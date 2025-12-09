@@ -96,6 +96,10 @@ def extract_top_words(
         axis=1,
     )
 
+    # 2文字以上の単語のみをフィルタリング（1文字の単語は摂動対象外）
+    df = df[df["Word"].str.len() >= 2]
+    logger.info(f"2文字以上の単語にフィルタリング: {len(df)} 件")
+
     # スコアでソートして上位N件を取得
     df_sorted = df.sort_values("importance_score", ascending=False).head(top_n)
 

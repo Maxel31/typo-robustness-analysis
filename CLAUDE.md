@@ -107,7 +107,7 @@ main (本番環境、絶対に直接コミットしない)
 - [x] mainブランチへの初期コミット
 - [x] developブランチの作成
 
-### 実装.1: (前処理) 言語リソースごとの頻出単語の特定
+### 実装.1: (前処理) 言語リソースごとの頻出単語の特定 ✅ 完了
 
 **目的**: 文字レベルの摂動を加える単語候補リストを作成
 
@@ -121,6 +121,14 @@ main (本番環境、絶対に直接コミットしない)
 - 入力: データセット(Excel形式、ユーザが格納)
 - 出力: `data/processed/{language}/frequent_words_top{N}.json`
 - 実行時引数: N (300~1000程度)
+
+**完了タスク**:
+- [x] ユーティリティモジュール実装 (`src/utils/config.py`, `src/utils/logger.py`)
+- [x] 英語頻出単語抽出モジュール実装 (`src/preprocessing/english_words.py`)
+- [x] 日本語頻出単語抽出モジュール実装 (`src/preprocessing/japanese_words.py`)
+- [x] 実行スクリプト作成 (`scripts/run_preprocessing.py`)
+- [x] ユニットテスト作成 (`tests/test_preprocessing/`)
+- [x] 実データでの動作確認 (英語: 74,286件、日本語: 185,136件から抽出)
 
 ### 実装.2: (実験.1) 文字レベルの摂動を加えた際に影響の大きい単語の特定
 
@@ -323,6 +331,7 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-09: 実装.1完了 - 英語・日本語頻出単語抽出機能を実装
 - 2025-12-09: プロジェクト初期設定、CLAUDE.md作成
 
 ---

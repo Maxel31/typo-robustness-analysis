@@ -19,17 +19,20 @@ class TestExtractTopWords:
 
     @pytest.fixture
     def sample_df(self) -> pd.DataFrame:
-        """テスト用のサンプルDataFrameを作成."""
+        """テスト用のサンプルDataFrameを作成.
+
+        Note: 2文字以上の単語のみが抽出対象となるため、テストデータも2文字以上の単語を使用.
+        """
         return pd.DataFrame(
             {
-                "lForm": ["の", "に", "て", "は", "を"],
-                "lemma": ["の", "に", "て", "は", "を"],
+                "lForm": ["これ", "それ", "どれ", "あれ", "ここ"],
+                "lemma": ["これ", "それ", "どれ", "あれ", "ここ"],
                 "pos": [
-                    "助詞-格助詞",
-                    "助詞-格助詞",
-                    "助詞-接続助詞",
-                    "助詞-係助詞",
-                    "助詞-格助詞",
+                    "代名詞",
+                    "代名詞",
+                    "代名詞",
+                    "代名詞",
+                    "代名詞",
                 ],
                 "pmw": [48383.9, 34188.6, 33391.0, 31448.7, 28000.0],
                 "frequency": [5061558, 3576558, 3493117, 3289932, 2900000],
@@ -67,7 +70,7 @@ class TestExtractTopWords:
         """最も頻出の単語が正しく抽出されることを確認."""
         result = extract_top_words(sample_df, top_n=1)
 
-        assert result[0]["word"] == "の"
+        assert result[0]["word"] == "これ"
         assert result[0]["score"] == pytest.approx(48383.9)
 
     def test_missing_column_raises_error(self) -> None:

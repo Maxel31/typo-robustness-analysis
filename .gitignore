@@ -52,7 +52,9 @@ htmlcov/
 
 # Data files (raw data should not be committed)
 data/raw/
-data/processed/
+
+# 処理済みデータは含める（実験の再現性のため）
+# data/processed/ はコミット対象
 
 # Results
 results/

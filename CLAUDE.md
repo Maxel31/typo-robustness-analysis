@@ -136,14 +136,40 @@ main (本番環境、絶対に直接コミットしない)
 
 **処理内容**:
 1. 候補リスト内の各単語に文字レベルの摂動を加える
-   - 摂動方法: 各10%の確率で置換・挿入・削除
+   - 摂動方法: 各文字に対して独立した確率で置換・挿入・削除 (デフォルト: 各20%)
    - ベンチマークで推論精度を測定
 2. 摂動回数で正規化した推論精度低下度合いを算出
 3. 影響の大きい単語をランキング化
 4. ワードクラウドで可視化
 
+**進捗状況**:
+- [x] 摂動モジュール実装 (`src/perturbation/perturbator.py`)
+- [x] ベンチマーク摂動モジュール実装 (`src/perturbation/benchmark_perturbator.py`)
+- [x] 摂動生成スクリプト作成 (`scripts/run_perturbation.py`)
+- [x] ユニットテスト作成 (`tests/test_perturbation/`)
+- [x] CLI引数による摂動確率の設定対応 (replace/insert/delete個別)
+- [x] モデルロードモジュール実装 (`src/models/model_loader.py`)
+- [x] ベンチマークローダー実装 (`src/benchmarks/benchmark_loader.py`)
+  - 英語: GSM8K, BBH, MMLU
+  - 日本語: Jamp, JNLI, NIILC, JSQuAD, JCommonsenseQA (各タスク個別ロード)
+- [x] 文字種保持の摂動（ひらがな→ひらがな、カタカナ→カタカナ）
+- [x] 摂動なしサンプルのスキップ機能
+- [x] 頻出単語スコアをメタデータに追加
+- [ ] 評価・結果集計モジュール実装
+- [ ] 推論実行スクリプト作成
+- [ ] ワードクラウド可視化
+- [ ] テスト作成と動作確認
+
 **出力構造**:
 ```
+data/perturbed/
+├── {benchmark_name}/
+│   ├── original/
+│   │   └── examples.json      # 元のベンチマークデータ
+│   └── perturbed/
+│       └── {target_word}/
+│           └── examples.json  # 摂動済みデータ
+
 results/
 ├── {model_name}/
 │   ├── {benchmark_name}/
@@ -188,8 +214,12 @@ results/
 - BBH: 多様な推論タスク
 - MMLU: 多分野の知識理解
 
-**日本語**:
-- llm-jp-eval: 日本語総合評価
+**日本語** (zenless-lab/llm-jp-evalデータセットから個別ロード):
+- Jamp: 含意関係認識
+- JNLI: 自然言語推論
+- NIILC: 質問応答
+- JSQuAD: 読解問題
+- JCommonsenseQA: 常識推論
 
 ---
 
@@ -215,6 +245,9 @@ NLP2026/
 │       └── japanese/  # 日本語頻出単語リスト
 ├── src/               # ソースコード
 │   ├── __init__.py
+│   ├── benchmarks/    # ベンチマークローダー
+│   │   ├── __init__.py
+│   │   └── benchmark_loader.py
 │   ├── preprocessing/ # 前処理モジュール
 │   │   ├── __init__.py
 │   │   ├── english_words.py
@@ -222,7 +255,7 @@ NLP2026/
 │   ├── perturbation/  # 摂動処理モジュール
 │   │   ├── __init__.py
 │   │   ├── perturbator.py
-│   │   └── evaluator.py
+│   │   └── benchmark_perturbator.py
 │   ├── models/        # モデルロード・推論
 │   │   ├── __init__.py
 │   │   ├── model_loader.py
@@ -237,8 +270,8 @@ NLP2026/
 │   ├── test_perturbation/
 │   └── test_models/
 ├── scripts/           # 実行スクリプト
-│   ├── run_preprocessing.py
-│   └── run_experiment.py
+│   ├── run_preprocessing.py  # 頻出単語抽出
+│   └── run_perturbation.py   # 摂動データ生成
 ├── results/           # 実験結果
 │   └── experiment1/
 │       ├── {model_name}/
@@ -331,6 +364,11 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-10: 実装.2進行中 - ベンチマークローダー・摂動生成機能を実装
+  - 日本語タスク別ローダー (Jamp, JNLI, NIILC, JSQuAD, JCommonsenseQA)
+  - 文字種保持の摂動機能 (ひらがな→ひらがな等)
+  - 摂動なしサンプルのスキップ機能
+  - 頻出単語スコアをメタデータに追加
 - 2025-12-09: 実装.1完了 - 英語・日本語頻出単語抽出機能を実装
 - 2025-12-09: プロジェクト初期設定、CLAUDE.md作成
 

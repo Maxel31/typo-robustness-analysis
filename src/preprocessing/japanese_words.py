@@ -66,6 +66,12 @@ def extract_top_words(
         if col not in df.columns:
             raise ValueError(f"必要なカラムが見つかりません: {col}")
 
+    # 2文字以上の単語のみをフィルタリング（1文字の単語は摂動対象外）
+    # lForm（語形）とlemma（見出し語）の両方が2文字以上である必要がある
+    df = df.copy()
+    df = df[(df["lForm"].str.len() >= 2) & (df["lemma"].str.len() >= 2)]
+    logger.info(f"2文字以上の単語にフィルタリング: {len(df)} 件")
+
     # pmwでソートして上位N件を取得
     df_sorted = df.sort_values("pmw", ascending=False).head(top_n)
 

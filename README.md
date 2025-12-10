@@ -103,6 +103,115 @@ uv run python scripts/run_preprocessing.py --language both --top-n 500
 }
 ```
 
+### 実装.2: 摂動データ生成
+
+頻出単語に対して文字レベルの摂動（typo）を適用したベンチマークデータを生成します。
+
+```bash
+# 英語ベンチマーク (GSM8K, BBH, MMLU) で摂動生成
+PYTHONPATH=. uv run python scripts/run_perturbation.py \
+    --language english --top-n 10
+
+# 日本語ベンチマーク (Jamp, JNLI, NIILC, JSQuAD, JCommonsenseQA) で摂動生成
+PYTHONPATH=. uv run python scripts/run_perturbation.py \
+    --language japanese --top-n 10
+
+# 特定のベンチマークのみ
+PYTHONPATH=. uv run python scripts/run_perturbation.py \
+    --language japanese --benchmarks jcommonsenseqa jsquad --top-n 10
+
+# サンプルデータでテスト
+PYTHONPATH=. uv run python scripts/run_perturbation.py \
+    --language english --top-n 3 --use-sample-data
+
+# カスタム確率で実行
+PYTHONPATH=. uv run python scripts/run_perturbation.py \
+    --language english --top-n 10 \
+    --replace-prob 0.1 --insert-prob 0.1 --delete-prob 0.1
+```
+
+**オプション**:
+- `--language`: 処理する言語 (`english`, `japanese`)
+- `--benchmarks`: 処理するベンチマーク名（指定しない場合は言語に対応する全ベンチマーク）
+  - 英語: `gsm8k`, `bbh`, `mmlu`
+  - 日本語: `jamp`, `jnli`, `niilc`, `jsquad`, `jcommonsenseqa`
+- `--top-n`: 対象とする頻出単語数 (デフォルト: 10)
+- `--max-samples`: ベンチマークごとの最大サンプル数 (デフォルト: 全件)
+- `--output-dir`: 出力ディレクトリ (デフォルト: `data/perturbed`)
+- `--replace-prob`: 各文字に対する置換確率 (デフォルト: 0.2)
+- `--insert-prob`: 各文字に対する挿入確率 (デフォルト: 0.2)
+- `--delete-prob`: 各文字に対する削除確率 (デフォルト: 0.2)
+- `--seed`: 乱数シード (デフォルト: 42)
+- `--use-sample-data`: サンプルデータを使用（テスト用）
+
+**摂動の仕組み**:
+- 単語全体に対して最大1回の摂動操作（置換・挿入・削除のいずれか）
+- 文字種を保持した摂動（ひらがな→ひらがな、カタカナ→カタカナ、英字→英字）
+- 摂動が発生しなかったサンプルは保存されない
+- 各テキスト例ごとに一意のシードで再現性を確保
+- 日本語の選択肢付き問題（JCommonsenseQA等）では、選択肢部分は摂動対象外
+
+**出力形式**:
+
+出力ファイルは以下の構造で保存されます:
+
+```
+data/perturbed/
+├── {benchmark_name}/
+│   ├── original/
+│   │   └── examples.json      # 元のベンチマークデータ
+│   └── perturbed/
+│       └── {target_word}/
+│           └── examples.json  # 摂動済みデータ
+```
+
+摂動済みデータの形式:
+```json
+{
+  "metadata": {
+    "benchmark_name": "jcommonsenseqa",
+    "target_word": "ます",
+    "language": "japanese",
+    "replace_prob": 0.2,
+    "insert_prob": 0.2,
+    "delete_prob": 0.2,
+    "base_seed": 42,
+    "num_examples": 100,
+    "total_occurrences": 150,
+    "perturbed_occurrences": 98,
+    "target_word_score": 10639.0901585
+  },
+  "examples": [
+    {
+      "id": 0,
+      "seed": 420000,
+      "original_text": "りんごが5個あります。...",
+      "perturbed_text": "りんごが5個ありま。...",
+      "perturbations": [
+        {
+          "occurrence_index": 0,
+          "start_position": 8,
+          "end_position": 10,
+          "original_word": "ます",
+          "perturbed_word": "ま",
+          "operations": [
+            {"position": 1, "operation": "delete", "original_char": "す", "new_char": null}
+          ]
+        }
+      ],
+      "total_occurrences_in_example": 2,
+      "perturbed_count_in_example": 1,
+      "answer": "3"
+    }
+  ]
+}
+```
+
+**メタデータフィールド**:
+- `target_word_score`: 頻出単語リストにおけるスコア（頻出度合い）
+- `total_occurrences`: データセット全体での対象単語の出現数
+- `perturbed_occurrences`: 摂動が適用された出現数
+
 ## 開発
 
 ### コード品質

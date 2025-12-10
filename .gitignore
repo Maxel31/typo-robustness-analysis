@@ -50,11 +50,10 @@ uv.lock
 htmlcov/
 .pytest_cache/
 
-# Data files (raw data should not be committed)
+# Data files (raw data and output should not be committed)
 data/raw/
-
-# 処理済みデータは含める（実験の再現性のため）
-# data/processed/ はコミット対象
+data/processed/
+data/perturbed/
 
 # Results
 results/

@@ -24,81 +24,65 @@ BENCHMARK_SHOTS: dict[str, int] = {
     "jcommonsenseqa": 0,
 }
 
-# GSM8K用8-shot CoT examples (Wei et al., 2022 Chain-of-Thought論文より)
+# GSM8K用8-shot CoT examples
+# lm-eval-harness公式: https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/gsm8k/gsm8k-cot.yaml
+# 形式: Q: {{question}}\n\nA: {{target}}
+# fmt: off
 GSM8K_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
     {
         "question": "There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?",
-        "answer": "There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6. #### 6",
+        "target": "There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6. The answer is 6.",
     },
     {
         "question": "If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot?",
-        "answer": "There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5. #### 5",
+        "target": "There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5. The answer is 5.",
     },
     {
         "question": "Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total?",
-        "answer": "Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39. #### 39",
+        "target": "Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39. The answer is 39.",
     },
     {
         "question": "Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny?",
-        "answer": "Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave Denny 20 - 12 = 8. #### 8",
+        "target": "Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave Denny 20 - 12 = 8. The answer is 8.",
     },
     {
         "question": "Shawn has five toys. For Christmas, he got two toys each from his mom and dad. How many toys does he have now?",
-        "answer": "Shawn started with 5 toys. If he got 2 toys each from his mom and dad, then that is 2 + 2 = 4 more toys. 5 + 4 = 9. #### 9",
+        "target": "Shawn started with 5 toys. If he got 2 toys each from his mom and dad, then that is 4 more toys. 5 + 4 = 9. The answer is 9.",
     },
     {
         "question": "There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room?",
-        "answer": "There were originally 9 computers. For each of 4 days, 5 more computers were added. So 5 * 4 = 20 computers were added. 9 + 20 = 29. #### 29",
+        "target": "There were originally 9 computers. For each of 4 days, 5 more computers were added. So 5 * 4 = 20 computers were added. 9 + 20 is 29. The answer is 29.",
     },
     {
         "question": "Michael had 58 golf balls. On tuesday, he lost 23 golf balls. On wednesday, he lost 2 more. How many golf balls did he have at the end of wednesday?",
-        "answer": "Michael started with 58 golf balls. After losing 23 on tuesday, he had 58 - 23 = 35. After losing 2 more, he had 35 - 2 = 33 golf balls. #### 33",
+        "target": "Michael started with 58 golf balls. After losing 23 on tuesday, he had 58 - 23 = 35. After losing 2 more, he had 35 - 2 = 33 golf balls. The answer is 33.",
     },
     {
         "question": "Olivia has $23. She bought five bagels for $3 each. How much money does she have left?",
-        "answer": "Olivia had 23 dollars. 5 bagels for 3 dollars each will be 5 * 3 = 15 dollars. So she has 23 - 15 = 8 dollars left. #### 8",
+        "target": "Olivia had 23 dollars. 5 bagels for 3 dollars each will be 5 x 3 = 15 dollars. So she has 23 - 15 dollars left. 23 - 15 is 8. The answer is 8.",
     },
 ]
+# fmt: on
 
 # BBH用few-shot examples (3-shot)
-BBH_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
-    {
-        "question": 'Is the following sentence plausible? "Kyle Palmieri scored in overtime."',
-        "answer": "yes",
-    },
-    {
-        "question": 'Is the following sentence plausible? "Lebron James threw a touchdown pass."',
-        "answer": "no",
-    },
-    {
-        "question": 'Is the following sentence plausible? "Jonas Valanciunas beat the buzzer."',
-        "answer": "yes",
-    },
-]
+# lm-eval-harness公式: 各サブタスクごとにfewshot examplesを定義
+# https://github.com/EleutherAI/lm-evaluation-harness/tree/main/lm_eval/tasks/bbh/fewshot
+# 形式: Q: {{input}}\nA: Let's think step by step.\n{{target}}
+# BBHは各サブタスクで異なるfew-shot examplesを使用するため、実行時に動的に取得
+BBH_FEW_SHOT_EXAMPLES: list[dict[str, str]] = []  # サブタスク別に動的設定
 
-# MMLU用few-shot examples (5-shot) - 一般的な知識問題
-MMLU_FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
-    {
-        "question": "What is the capital of France?\nA. London\nB. Berlin\nC. Paris\nD. Madrid",
-        "answer": "C",
-    },
-    {
-        "question": "Which planet is known as the Red Planet?\nA. Venus\nB. Mars\nC. Jupiter\nD. Saturn",
-        "answer": "B",
-    },
-    {
-        "question": "What is the chemical symbol for water?\nA. O2\nB. CO2\nC. H2O\nD. NaCl",
-        "answer": "C",
-    },
-    {
-        "question": "Who wrote 'Romeo and Juliet'?\nA. Charles Dickens\nB. William Shakespeare\nC. Jane Austen\nD. Mark Twain",
-        "answer": "B",
-    },
-    {
-        "question": "What is 15 + 27?\nA. 32\nB. 42\nC. 52\nD. 62",
-        "answer": "B",
-    },
-]
+# MMLU用few-shot examples (5-shot)
+# lm-eval-harness公式: output_type=multiple_choice（ログ確率比較）
+# https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/mmlu/default/_default_template_yaml
+# プロンプト形式:
+# {{question.strip()}}
+# A. {{choices[0]}}
+# B. {{choices[1]}}
+# C. {{choices[2]}}
+# D. {{choices[3]}}
+# Answer:
+# ログ確率方式ではfew-shotは使用しない（doc_to_choice: ["A", "B", "C", "D"]）
+MMLU_FEW_SHOT_EXAMPLES: list[dict[str, str]] = []  # ログ確率方式では不要
 
 # ベンチマーク別few-shot examples
 FEW_SHOT_EXAMPLES: dict[str, list[dict[str, str]]] = {
@@ -108,38 +92,51 @@ FEW_SHOT_EXAMPLES: dict[str, list[dict[str, str]]] = {
 }
 
 # ptモデル用プロンプトテンプレート（チャットテンプレートなし）
+# lm-eval-harness公式形式に準拠
 PT_PROMPT_TEMPLATES: dict[str, dict[str, str]] = {
     "gsm8k": {
-        "prefix": "",  # GSM8Kはprefixなし、Q/A形式
-        "question_template": "Q: {question}\nA:",
-        "answer_template": " {answer}\n\n",
+        # 公式: doc_to_text: "Q: {{question}}\n\nA:"
+        # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/gsm8k/gsm8k-cot.yaml
+        "prefix": "",
+        "question_template": "Q: {question}\n\nA:",
+        "answer_template": " {target}\n\n",
     },
     "bbh": {
-        "prefix": "Answer the following question.\n\n",
+        # 公式: doc_to_target: "{{target}}", target_delimiter: ""
+        # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/bbh/cot_fewshot/_cot_fewshot_template_yaml
+        # CoTプロンプトは公式では含まれていない
+        "prefix": "",
         "question_template": "Q: {question}\nA:",
-        "answer_template": " {answer}\n\n",
+        "answer_template": " {target}\n\n",
     },
     "mmlu": {
-        "prefix": "Answer the following multiple choice question by selecting A, B, C, or D.\n\n",
+        # 公式: output_type: multiple_choice (ログ確率比較)
+        # doc_to_text: "{{question.strip()}}\nA. {{choices[0]}}\n...\nAnswer:"
+        # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/mmlu/default/_default_template_yaml
+        "prefix": "",
         "question_template": "{question}\nAnswer:",
-        "answer_template": " {answer}\n\n",
+        "answer_template": " {target}\n\n",
     },
 }
 
 # itモデル用プロンプトテンプレート（チャットテンプレート用）
+# ITモデルでもlm-eval-harnessの公式プロンプト形式を尊重
 IT_PROMPT_TEMPLATES: dict[str, dict[str, str]] = {
     "gsm8k": {
-        "system": "Solve the following math problem step by step. "
-        "At the end, provide only the final numerical answer after '####'.",
-        "user": "Question: {question}\n\nAnswer:",
+        # GSM8K CoT形式: Q/A形式でステップバイステップの推論を促す
+        "system": "You are a helpful assistant that solves math problems step by step.",
+        "user": "Q: {question}\n\nA:",
     },
     "bbh": {
-        "system": "Answer the following question. Provide only the final answer.",
-        "user": "{question}\n\nAnswer:",
+        # BBH: 公式実装ではCoTプロンプトは含まない
+        # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/bbh/cot_fewshot/_cot_fewshot_template_yaml
+        "system": "You are a helpful assistant that thinks step by step.",
+        "user": "Q: {question}\nA:",
     },
     "mmlu": {
-        "system": "Answer the following multiple choice question by selecting A, B, C, or D.",
-        "user": "{question}\n\nAnswer:",
+        # MMLU: 選択肢A/B/C/Dから選択（ログ確率方式推奨）
+        "system": "Answer the following multiple choice question.",
+        "user": "{question}\nAnswer:",
     },
     # 日本語ベンチマーク
     "jamp": {
@@ -202,7 +199,7 @@ def create_pt_prompt(
         template = {
             "prefix": "",
             "question_template": "Q: {question}\nA:",
-            "answer_template": " {answer}\n\n",
+            "answer_template": " {target}\n\n",
         }
 
     # few-shot examplesを追加
@@ -218,10 +215,10 @@ def create_pt_prompt(
     # few-shot examples
     for example in few_shot_examples[:num_shots]:
         example_question = example["question"]
-        example_answer = example["answer"]
+        example_target = example["target"]
 
         q_part = template["question_template"].format(question=example_question)
-        a_part = template["answer_template"].format(answer=example_answer)
+        a_part = template["answer_template"].format(target=example_target)
         prompt_parts.append(q_part + a_part)
 
     # 実際の質問

@@ -42,6 +42,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]  # スクリプトではパス設定後にインポートが必要
+"src/models/inference.py" = ["E501"]  # few-shot examplesは公式形式を維持するため行長制限を緩和
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

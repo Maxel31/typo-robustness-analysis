@@ -3,6 +3,7 @@
 各ベンチマークに対する評価関数を提供.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,12 +26,16 @@ class EvaluationResult:
 def extract_number_from_text(text: str) -> str | None:
     """テキストから数値を抽出（GSM8K評価用）.
 
-    lm-eval-harnessのGSM8K評価を参考にした抽出方式.
+    lm-eval-harness公式のGSM8K評価方式に準拠.
     参考: https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/gsm8k/gsm8k-cot.yaml
 
+    公式フィルタ:
+    - strict-match: regex "The answer is (\\-?[0-9\\.\\,]+)"
+    - flexible-extract: regex "(-?[$0-9.,]{2,})|(-?[0-9]+)" with group_select: -1
+
     抽出優先順位:
-    1. #### <数値> パターン（GSM8K公式回答形式）
-    2. The answer is <数値> パターン（strict-match方式）
+    1. "The answer is <数値>" パターン（strict-match方式、公式推奨）
+    2. #### <数値> パターン（GSM8Kデータセット形式、後方互換）
     3. 最後の数値（flexible-extract方式、フォールバック）
 
     Args:
@@ -39,19 +44,8 @@ def extract_number_from_text(text: str) -> str | None:
     Returns:
         抽出された数値文字列（抽出できない場合はNone）
     """
-    # 1. #### <数値> パターンを優先（GSM8K公式形式）
-    # ####の直後に空白（改行以外）があり、その後に数値が続くパターン
-    # 改行後の数値は別の文脈の可能性があるため除外
-    hash_pattern = r"####[ \t]*(-?[\d,]+\.?\d*)"
-    hash_match = re.search(hash_pattern, text)
-    if hash_match and hash_match.group(1):  # 数値が空でないことを確認
-        extracted = hash_match.group(1)
-        normalized = extracted.replace(",", "")
-        if normalized.endswith("."):
-            normalized = normalized[:-1]
-        return normalized if normalized else None
-
-    # 2. The answer is <数値> パターン（strict-match方式）
+    # 1. The answer is <数値> パターン（strict-match方式、公式推奨）
+    # 公式regex: "The answer is (\\-?[0-9\\.\\,]+)"
     answer_pattern = r"[Tt]he answer is\s*\$?(-?[\d,]+\.?\d*)"
     answer_match = re.search(answer_pattern, text)
     if answer_match:
@@ -59,11 +53,22 @@ def extract_number_from_text(text: str) -> str | None:
         normalized = extracted.replace(",", "")
         if normalized.endswith("."):
             normalized = normalized[:-1]
-        return normalized if normalized else None
+        if normalized:
+            return normalized
+
+    # 2. #### <数値> パターン（GSM8Kデータセット形式、後方互換）
+    hash_pattern = r"####[ \t]*(-?[\d,]+\.?\d*)"
+    hash_match = re.search(hash_pattern, text)
+    if hash_match and hash_match.group(1):
+        extracted = hash_match.group(1)
+        normalized = extracted.replace(",", "")
+        if normalized.endswith("."):
+            normalized = normalized[:-1]
+        if normalized:
+            return normalized
 
     # 3. flexible-extractパターン（フォールバック）
-    # (-?[$0-9.,]{2,}): $や数字、カンマ、ピリオドを含む2文字以上の文字列
-    # |(-?[0-9]+): または負の整数
+    # 公式regex: "(-?[$0-9.,]{2,})|(-?[0-9]+)" with group_select: -1
     flex_pattern = r"(-?[$0-9.,]{2,})|(-?[0-9]+)"
     matches = re.findall(flex_pattern, text)
     if not matches:
@@ -126,8 +131,11 @@ def evaluate_gsm8k(results: list[InferenceResult]) -> EvaluationResult:
         # 比較（小数点以下を考慮）
         is_correct = False
         if expected is not None and predicted is not None:
+            # 無限大やNaNの場合は不正解
+            if not math.isfinite(expected) or not math.isfinite(predicted):
+                is_correct = False
             # 整数比較の場合
-            if expected == int(expected) and predicted == int(predicted):
+            elif expected == int(expected) and predicted == int(predicted):
                 is_correct = int(expected) == int(predicted)
             else:
                 # 小数比較の場合は許容誤差を設定
@@ -157,11 +165,14 @@ def evaluate_gsm8k(results: list[InferenceResult]) -> EvaluationResult:
 
 
 def extract_answer_bbh(text: str) -> str:
-    """BBHの回答を抽出（lm-eval-harness方式）.
+    """BBHの回答を抽出（lm-eval-harness公式方式）.
 
-    lm-eval-harnessのBBH評価と同様の方式で回答を抽出.
-    正規表現: (?<=the answer is )(.*)(?=.)
-    参考: lm_eval/tasks/bbh/cot_fewshot/_cot_fewshot_template_yaml
+    lm-eval-harness公式のBBH評価方式に準拠.
+    参考: https://github.com/EleutherAI/lm-evaluation-harness/pull/2013
+
+    公式フィルタ（PR #2013で修正済み）:
+    - regex: "(?<=the answer is )(.*?)(?=\\s*$|\\s*\\.)"
+    - 旧バージョン（バグあり）: "(?<=the answer is )(.*)(?=.)"
 
     Args:
         text: 抽出対象のテキスト
@@ -171,12 +182,18 @@ def extract_answer_bbh(text: str) -> str:
     """
     text = text.strip()
 
-    # lm-eval-harness方式: "the answer is X." からXを抽出
-    # 正規表現: (?<=the answer is )(.*)(?=.)
-    # より柔軟なパターンで対応
-    answer_match = re.search(r"[Tt]he answer is\s+(.+?)(?:\.|$)", text, re.IGNORECASE)
+    # lm-eval-harness公式パターン（PR #2013）
+    # regex: "(?<=the answer is )(.*?)(?=\\s*$|\\s*\\.)"
+    # 非貪欲マッチで末尾の空白やピリオドを適切に処理
+    answer_match = re.search(
+        r"(?<=[Tt]he answer is )(.*?)(?=\s*$|\s*\.)", text, re.IGNORECASE | re.DOTALL
+    )
     if answer_match:
-        return answer_match.group(1).strip()
+        extracted = answer_match.group(0).strip()
+        # 末尾のピリオドを除去（残っている場合）
+        if extracted.endswith("."):
+            extracted = extracted[:-1].strip()
+        return extracted
 
     # フォールバック: 生成テキスト全体をそのまま返す
     return text
@@ -249,6 +266,12 @@ def extract_answer_from_text(text: str, benchmark_name: str) -> str:
 def normalize_bbh_answer(text: str) -> str:
     """BBHの回答を正規化.
 
+    BBHタスクは多様な回答形式を持つため、柔軟な正規化が必要:
+    - True/False形式
+    - 括弧付き選択肢 (A), (B), etc.
+    - 単独の選択肢 A, B, etc.
+    - 数値形式
+
     Args:
         text: 正規化対象のテキスト
 
@@ -262,17 +285,57 @@ def normalize_bbh_answer(text: str) -> str:
     if lower_text in ["true", "false"]:
         return lower_text.capitalize()
 
-    # 括弧付きの選択肢 (A), (B), etc. → A, B
-    match = re.search(r"\(([A-Za-z])\)", text)
+    # 括弧付きの選択肢 (A), (B), etc. → (A), (B) (括弧を保持)
+    # BBHでは選択肢形式は括弧付きで統一されている
+    match = re.match(r"^\(([A-Za-z])\)$", text)
     if match:
-        return match.group(1).upper()
+        return f"({match.group(1).upper()})"
 
-    # 単独の選択肢 A, B, etc.
+    # 単独の選択肢 A, B, etc. → (A), (B) (括弧を追加)
     match = re.match(r"^([A-Za-z])$", text)
     if match:
-        return match.group(1).upper()
+        return f"({match.group(1).upper()})"
 
     return text
+
+
+def extract_choice_value_from_bbh(
+    expected: str, text: str, original_question: str | None = None
+) -> str | None:
+    """BBHの選択肢形式の回答から値を抽出.
+
+    BBHタスクでは、モデルが選択肢ラベル（例: (C)）ではなく
+    その値（例: 36）を直接出力することがある。
+    問題文から選択肢と値のマッピングを取得し、値から選択肢を逆引きする。
+
+    Args:
+        expected: 期待される回答（選択肢形式、例: "(C)"）
+        text: モデルの出力テキスト（値形式の可能性あり、例: "36"）
+        original_question: 元の問題文（選択肢を含む）
+
+    Returns:
+        値に対応する選択肢（見つからない場合はNone）
+    """
+    if original_question is None:
+        return None
+
+    # 選択肢パターンを抽出: (A) value, (B) value, etc.
+    # 例: Options:\n(A) 24\n(B) 29\n(C) 36
+    choice_pattern = r"\(([A-E])\)\s*([^\n\(]+)"
+    choices = re.findall(choice_pattern, original_question)
+
+    if not choices:
+        return None
+
+    # 値から選択肢への逆引き
+    text_stripped = text.strip()
+    for label, value in choices:
+        value_stripped = value.strip()
+        # 完全一致または値の一部として含まれる場合
+        if text_stripped == value_stripped or value_stripped == text_stripped:
+            return f"({label})"
+
+    return None
 
 
 def evaluate_bbh(
@@ -282,12 +345,13 @@ def evaluate_bbh(
     """BBHベンチマークの評価（lm-eval-harness方式）.
 
     lm-eval-harnessと同様の評価方式:
-    1. "the answer is X." からXを抽出
+    1. "the answer is X." からXを抽出（修正版パターン PR #2013）
     2. exact_matchでターゲットと比較
+    3. 選択肢形式の問題では、値から選択肢への逆引きもサポート
 
     Args:
         results: 推論結果のリスト
-        examples: 元のサンプルデータ（subtask情報を含む）
+        examples: 元のサンプルデータ（subtask情報、問題文を含む）
 
     Returns:
         評価結果
@@ -302,8 +366,25 @@ def evaluate_bbh(
         # predicted: モデル出力から抽出した回答
         predicted = extract_answer_bbh(result.generated_text)
 
+        # 正規化して比較
+        expected_normalized = normalize_bbh_answer(expected)
+        predicted_normalized = normalize_bbh_answer(predicted)
+
         # exact_match: 大文字小文字を無視して比較
-        is_correct = expected.lower() == predicted.lower()
+        is_correct = expected_normalized.lower() == predicted_normalized.lower()
+
+        # 選択肢形式の問題で不正解の場合、値から選択肢への逆引きを試みる
+        # 例: expected="(C)", predicted="36", question contains "(C) 36"
+        if not is_correct and examples and i < len(examples):
+            original_question = examples[i].get("question", "") or examples[i].get("input", "")
+            if original_question:
+                # 値から選択肢を逆引き
+                choice_from_value = extract_choice_value_from_bbh(
+                    expected, predicted, original_question
+                )
+                if choice_from_value:
+                    predicted_normalized = choice_from_value
+                    is_correct = expected_normalized.lower() == predicted_normalized.lower()
 
         if is_correct:
             correct += 1
@@ -324,7 +405,9 @@ def evaluate_bbh(
                 "id": result.example_id,
                 "subtask": subtask,
                 "expected": expected,
+                "expected_normalized": expected_normalized,
                 "predicted": predicted,
+                "predicted_normalized": predicted_normalized,
                 "is_correct": is_correct,
                 "generated_text": result.generated_text[:200],
             }

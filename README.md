@@ -308,9 +308,13 @@ PYTHONPATH=. uv run python scripts/run_inference.py \
 5. 影響度でソートしたランキングをJSON出力
 6. ワードクラウドを生成
 
-**評価指標**（lm-eval-harness準拠）:
-- **GSM8K**: 数値のExact Match（`####`後の数値、または最後の数値を抽出）
-- **BBH**: サブタスク別のExact Match
+**評価指標**（lm-eval-harness公式実装に完全準拠）:
+- **GSM8K**: 文字列のExact Match
+  - 正規化: `regexes_to_ignore: ["#### ", ",", "\\$", "\\."]`, `ignore_case: true`
+  - `####`後の数値、または最後の数値を抽出
+- **BBH**: サブタスク別のExact Match（厳密な大文字小文字区別）
+  - 全27サブタスクの3-shot examplesを内蔵
+  - Chain-of-Thought形式: "Let's think step by step."
 - **MMLU**: ログ確率ベース評価（`output_type: multiple_choice`）
   - 各選択肢（A/B/C/D）のログ確率を計算し、最大値の選択肢を予測として採用
   - テキスト生成ではなく、確率比較による評価で安定性向上

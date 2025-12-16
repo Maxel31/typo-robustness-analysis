@@ -392,6 +392,14 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-16: lm-eval-harness公式実装に完全準拠
+  - GSM8K評価: 数値比較から文字列比較（exact_match）に変更
+    - `normalize_gsm8k_answer()`関数追加
+    - `regexes_to_ignore: ["#### ", ",", "\\$", "\\."]`, `ignore_case: true`
+  - BBH評価: `lower()`削除、厳密なexact_matchに変更
+  - MMLU評価: `evaluate_mmlu_with_logprobs()`メソッド追加
+  - BBH few-shot examples: 全27サブタスクの3-shot examplesを追加
+  - 評価モジュールテスト: `tests/test_evaluation/`を新規作成
 - 2025-12-11: MMLU評価をlm-eval-harness準拠のログ確率方式に変更
   - `output_type: multiple_choice`（選択肢のログ確率比較）を実装
   - `compute_choice_logprobs()`をLocalModel・VLLMModelに追加

@@ -39,11 +39,17 @@ from src.models import (
     SUPPORTED_MODELS,
     GenerationConfig,
     InferenceResult,
+    MMLUInferenceResult,
     get_supported_models,
     load_model,
     setup_device,
 )
-from src.models.inference import BENCHMARK_SHOTS, create_prompt
+from src.models.inference import (
+    BENCHMARK_SHOTS,
+    create_prompt,
+    run_inference_mmlu,
+    run_inference_mmlu_perturbed,
+)
 from src.utils.logger import logger
 from src.visualization import generate_and_save_wordcloud
 
@@ -146,7 +152,7 @@ def run_model_inference(
 
 
 def save_inference_results(
-    results: list[InferenceResult],
+    results: list[InferenceResult] | list[MMLUInferenceResult],
     output_path: Path,
     metadata: dict[str, Any] | None = None,
     evaluation_result: EvaluationResult | None = None,
@@ -154,7 +160,7 @@ def save_inference_results(
     """推論結果を保存（正誤判定付き）.
 
     Args:
-        results: 推論結果のリスト
+        results: 推論結果のリスト（InferenceResultまたはMMLUInferenceResult）
         output_path: 出力ファイルパス
         metadata: メタデータ
         evaluation_result: 評価結果（per_sample_resultsに正誤情報を含む）
@@ -192,6 +198,211 @@ def save_inference_results(
     logger.info(f"推論結果を保存: {output_path}")
 
 
+def process_benchmark_mmlu(
+    model: Any,
+    perturbed_dir: Path,
+    output_dir: Path,
+    top_n: int | None = None,
+    font_path: str | None = None,
+    normalization_method: str = "per_perturbation",
+    use_chat_format: bool = True,
+    save_inference: bool = False,
+) -> AnalysisResult:
+    """MMLUベンチマークの推論・評価・分析を実行（ログ確率方式、lm-eval-harness公式準拠）.
+
+    lm-eval-harness公式のMMLU評価方式:
+    - output_type: multiple_choice
+    - metric: acc (選択肢のログ確率比較)
+
+    Args:
+        model: 推論に使用するモデル
+        perturbed_dir: 摂動データディレクトリ
+        output_dir: 出力ディレクトリ
+        top_n: 処理する単語数の上限
+        font_path: ワードクラウド用フォントパス
+        normalization_method: 正規化手法
+        use_chat_format: チャット形式を使用するか（False=ptモデル用）
+        save_inference: 推論結果を保存するか
+
+    Returns:
+        分析結果
+    """
+    benchmark_name = "mmlu"
+    evaluator = BenchmarkEvaluator(benchmark_name)
+
+    # ベースラインデータの読み込みと推論
+    logger.info("=" * 60)
+    logger.info("MMLU ベースライン推論を開始（ログ確率方式）")
+    original_dir = perturbed_dir / "original"
+    baseline_metadata, baseline_examples = load_perturbed_data(original_dir)
+    text_field = baseline_metadata.get("text_field", "question")
+
+    # MMLU専用のログ確率方式で推論
+    baseline_results = run_inference_mmlu(
+        model=model,
+        examples=baseline_examples,
+        text_field=text_field,
+        use_chat_format=use_chat_format,
+        save_prompts=save_inference,
+    )
+
+    # ログ確率方式で評価
+    baseline_evaluation = evaluator.evaluate_mmlu_with_logprobs(baseline_results, baseline_examples)
+    logger.info(f"ベースライン精度: {baseline_evaluation.accuracy:.4f}")
+    logger.info(f"  ({baseline_evaluation.correct_samples}/{baseline_evaluation.total_samples})")
+
+    # ベースライン推論結果を保存（オプション）
+    if save_inference:
+        inference_dir = output_dir / "inference_results"
+        actual_num_shots = 0 if use_chat_format else BENCHMARK_SHOTS.get(benchmark_name, 0)
+        save_inference_results(
+            baseline_results,
+            inference_dir / "baseline_inference.json",
+            metadata={
+                "model_name": model.model_name,
+                "benchmark_name": benchmark_name,
+                "evaluation_method": "logprobs",  # ログ確率方式を明示
+                "use_chat_format": use_chat_format,
+                "num_shots": actual_num_shots,
+                "accuracy": baseline_evaluation.accuracy,
+                "correct_samples": baseline_evaluation.correct_samples,
+                "total_samples": baseline_evaluation.total_samples,
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+            evaluation_result=baseline_evaluation,
+        )
+
+    # ベースライン推論結果をIDでインデックス化
+    baseline_results_by_id = {result.example_id: result for result in baseline_results}
+
+    # 摂動データの推論
+    logger.info("=" * 60)
+    logger.info("MMLU 摂動データ推論を開始（ログ確率方式）")
+
+    perturbed_words_dir = perturbed_dir / "perturbed"
+    if not perturbed_words_dir.exists():
+        raise FileNotFoundError(f"摂動データディレクトリが見つかりません: {perturbed_words_dir}")
+
+    word_dirs = sorted([d for d in perturbed_words_dir.iterdir() if d.is_dir()])
+
+    if top_n:
+        word_dirs = word_dirs[:top_n]
+        logger.info(f"上位 {top_n} 単語のみ処理")
+
+    logger.info(f"処理対象単語数: {len(word_dirs)}")
+
+    # ベースラインサンプルをIDでインデックス化
+    baseline_by_id = {ex.get("id", i): ex for i, ex in enumerate(baseline_examples)}
+
+    # 各単語の摂動データを推論・評価
+    perturbed_results: dict[str, tuple[EvaluationResult, dict[str, Any]]] = {}
+
+    for i, word_dir in enumerate(word_dirs):
+        target_word = word_dir.name
+        logger.info(f"[{i + 1}/{len(word_dirs)}] 単語: {target_word}")
+
+        try:
+            metadata, perturbed_examples = load_perturbed_data(word_dir)
+
+            # 摂動サンプルに対してログ確率方式で推論
+            perturbed_inference_results = run_inference_mmlu_perturbed(
+                model=model,
+                perturbed_examples=perturbed_examples,
+                use_chat_format=use_chat_format,
+                save_prompts=save_inference,
+            )
+
+            # 摂動推論結果を保存（オプション）
+            if save_inference:
+                perturbed_evaluation_only = evaluator.evaluate_mmlu_with_logprobs(
+                    perturbed_inference_results, perturbed_examples
+                )
+                perturb_num_shots = 0 if use_chat_format else BENCHMARK_SHOTS.get(benchmark_name, 0)
+                save_inference_results(
+                    perturbed_inference_results,
+                    inference_dir / f"perturbed_{target_word}_inference.json",
+                    metadata={
+                        "model_name": model.model_name,
+                        "benchmark_name": benchmark_name,
+                        "target_word": target_word,
+                        "evaluation_method": "logprobs",
+                        "use_chat_format": use_chat_format,
+                        "num_shots": perturb_num_shots,
+                        "perturbed_occurrences": metadata.get("perturbed_occurrences", 0),
+                        "accuracy": perturbed_evaluation_only.accuracy,
+                        "correct_samples": perturbed_evaluation_only.correct_samples,
+                        "total_samples": perturbed_evaluation_only.total_samples,
+                        "created_at": datetime.now(UTC).isoformat(),
+                    },
+                    evaluation_result=perturbed_evaluation_only,
+                )
+
+            # 摂動推論結果をIDでインデックス化
+            perturbed_results_by_id = {
+                result.example_id: result for result in perturbed_inference_results
+            }
+
+            # 全サンプルの推論結果をマージ（評価用）
+            merged_results: list[MMLUInferenceResult] = []
+            merged_examples: list[dict[str, Any]] = []
+
+            for example_id, baseline_ex in baseline_by_id.items():
+                if example_id in perturbed_results_by_id:
+                    merged_results.append(perturbed_results_by_id[example_id])
+                    merged_examples.append(baseline_ex)
+                else:
+                    merged_results.append(baseline_results_by_id[example_id])
+                    merged_examples.append(baseline_ex)
+
+            # 評価（全サンプルに対して、ログ確率方式）
+            evaluation = evaluator.evaluate_mmlu_with_logprobs(merged_results, merged_examples)
+
+            perturbed_results[target_word] = (
+                evaluation,
+                {
+                    "target_word_score": metadata.get("target_word_score", 0.0),
+                    "total_occurrences": metadata.get("total_occurrences", 0),
+                    "perturbed_occurrences": metadata.get("perturbed_occurrences", 0),
+                    "num_examples": len(perturbed_examples),
+                },
+            )
+
+            accuracy_drop = baseline_evaluation.accuracy - evaluation.accuracy
+            logger.info(
+                f"  精度: {evaluation.accuracy:.4f} (低下: {accuracy_drop:.4f}) "
+                f"[摂動サンプル: {len(perturbed_examples)}/{len(merged_examples)}]"
+            )
+
+        except Exception as e:
+            logger.error(f"  エラー: {e}")
+            continue
+
+    # 分析実行
+    logger.info("=" * 60)
+    logger.info("影響度分析を実行")
+
+    analysis = analyze_perturbation_impact(
+        baseline_result=baseline_evaluation,
+        perturbed_results=perturbed_results,
+        model_name=model.model_name,
+        benchmark_name=benchmark_name,
+        normalization_method=normalization_method,
+    )
+
+    # 結果保存
+    logger.info("=" * 60)
+    logger.info("結果を保存")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    save_analysis_result(analysis, output_dir)
+
+    # ワードクラウド生成
+    logger.info("ワードクラウドを生成")
+    generate_and_save_wordcloud(analysis, output_dir, font_path=font_path)
+
+    return analysis
+
+
 def process_benchmark(
     model: Any,
     benchmark_name: str,
@@ -206,6 +417,9 @@ def process_benchmark(
     save_inference: bool = False,
 ) -> AnalysisResult:
     """ベンチマークの推論・評価・分析を実行.
+
+    MMLUの場合はログ確率方式（lm-eval-harness公式準拠）を使用.
+    その他のベンチマークはテキスト生成方式を使用.
 
     Args:
         model: 推論に使用するモデル
@@ -223,6 +437,19 @@ def process_benchmark(
     Returns:
         分析結果
     """
+    # MMLUの場合はログ確率方式（lm-eval-harness公式準拠）を使用
+    if benchmark_name == "mmlu":
+        return process_benchmark_mmlu(
+            model=model,
+            perturbed_dir=perturbed_dir,
+            output_dir=output_dir,
+            top_n=top_n,
+            font_path=font_path,
+            normalization_method=normalization_method,
+            use_chat_format=use_chat_format,
+            save_inference=save_inference,
+        )
+
     evaluator = BenchmarkEvaluator(benchmark_name)
 
     # ベースラインデータの読み込みと推論

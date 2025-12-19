@@ -155,9 +155,21 @@ main (本番環境、絶対に直接コミットしない)
 - [x] 文字種保持の摂動（ひらがな→ひらがな、カタカナ→カタカナ）
 - [x] 摂動なしサンプルのスキップ機能
 - [x] 頻出単語スコアをメタデータに追加
-- [ ] 評価・結果集計モジュール実装
-- [ ] 推論実行スクリプト作成
-- [ ] ワードクラウド可視化
+- [x] 推論実行モジュール実装 (`src/models/inference.py`)
+- [x] 評価モジュール実装 (`src/evaluation/evaluator.py`)
+  - GSM8K: 数値のExact Match (####後の数値 or 最後の数値) - lm-eval-harness準拠
+  - BBH: サブタスク別Exact Match - lm-eval-harness準拠
+  - MMLU: ログ確率ベース評価 (`output_type: multiple_choice`) - lm-eval-harness準拠
+  - 日本語: 完全一致 or 部分一致
+- [x] 結果集計モジュール実装 (`src/evaluation/analyzer.py`)
+  - 摂動回数による正規化 (per_perturbation_impact)
+  - ランキング生成とJSON出力
+- [x] ワードクラウド可視化 (`src/visualization/wordcloud_generator.py`)
+- [x] 推論実行スクリプト作成 (`scripts/run_inference.py`)
+- [x] ルールベース摂動モジュール実装 (`src/perturbation/rule_based_perturbator.py`)
+  - パターン1: 1文字置換で実在する同品詞の単語になる摂動
+  - WordNetを使用した単語存在確認と品詞判定
+- [x] ルールベース摂動スクリプト作成 (`scripts/run_rule_based_perturbation.py`)
 - [ ] テスト作成と動作確認
 
 **出力構造**:
@@ -185,17 +197,29 @@ results/
 
 ### モデル
 
-**英語モデル**:
+**英語モデル (PT: pretrained/base)** - few-shot推論用:
+- gemma-3-1b-pt
+- gemma-3-4b-pt
+- Mistral-7B-v0.3
+- Meta-Llama-3.2-3B
+
+**英語モデル (IT: instruction-tuned)** - 0-shot推論用:
 - gemma-3-1b-it
 - gemma-3-4b-it
-- Mistral-3-8B-Instruct-2512
-- Meta-Llama-3-8B-Instruct
-- gpt4-0613 (API経由)
+- Mistral-7B-Instruct-v0.3
+- Meta-Llama-3.2-3B-Instruct
+- gpt-4-0613 (API経由)
 
-**日本語モデル**:
+**日本語モデル (IT: instruction-tuned)**:
 - Llama-3.1-Swallow-8B-Instruct-v0.5
 - llm-jp-3-3.7b-instruct
 - llm-jp-3-13b-instruct
+
+**few-shot設定（PTモデル）**:
+- GSM8K: 8-shot Chain-of-Thought (Wei et al., 2022)
+- BBH: 3-shot
+- MMLU: 5-shot
+- ITモデルは0-shot（チャットテンプレート適用）
 
 ### データセット (頻出単語抽出用)
 
@@ -255,11 +279,19 @@ NLP2026/
 │   ├── perturbation/  # 摂動処理モジュール
 │   │   ├── __init__.py
 │   │   ├── perturbator.py
-│   │   └── benchmark_perturbator.py
+│   │   ├── benchmark_perturbator.py
+│   │   └── rule_based_perturbator.py  # ルールベース摂動（WordNet使用）
 │   ├── models/        # モデルロード・推論
 │   │   ├── __init__.py
 │   │   ├── model_loader.py
 │   │   └── inference.py
+│   ├── evaluation/    # 評価・分析モジュール
+│   │   ├── __init__.py
+│   │   ├── evaluator.py      # ベンチマーク評価
+│   │   └── analyzer.py       # 影響度分析・正規化
+│   ├── visualization/ # 可視化モジュール
+│   │   ├── __init__.py
+│   │   └── wordcloud_generator.py
 │   └── utils/         # ユーティリティ
 │       ├── __init__.py
 │       ├── config.py
@@ -270,8 +302,10 @@ NLP2026/
 │   ├── test_perturbation/
 │   └── test_models/
 ├── scripts/           # 実行スクリプト
-│   ├── run_preprocessing.py  # 頻出単語抽出
-│   └── run_perturbation.py   # 摂動データ生成
+│   ├── run_preprocessing.py        # 頻出単語抽出
+│   ├── run_perturbation.py         # ランダム摂動データ生成
+│   ├── run_rule_based_perturbation.py  # ルールベース摂動生成
+│   └── run_inference.py            # 推論実行・影響度分析
 ├── results/           # 実験結果
 │   └── experiment1/
 │       ├── {model_name}/
@@ -364,6 +398,39 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-16: ルールベース摂動モジュールを実装
+  - `src/perturbation/rule_based_perturbator.py`: WordNetを使用したルールベース摂動
+  - `scripts/run_rule_based_perturbation.py`: CLI実行スクリプト
+  - パターン1: 1文字置換で実在する同品詞の単語になる摂動
+  - NLTKのWordNetを使用して単語存在確認と品詞判定
+- 2025-12-16: lm-eval-harness公式実装に完全準拠
+  - GSM8K評価: 数値比較から文字列比較（exact_match）に変更
+    - `normalize_gsm8k_answer()`関数追加
+    - `regexes_to_ignore: ["#### ", ",", "\\$", "\\."]`, `ignore_case: true`
+  - BBH評価: `lower()`削除、厳密なexact_matchに変更
+  - MMLU評価: `evaluate_mmlu_with_logprobs()`メソッド追加
+  - BBH few-shot examples: 全27サブタスクの3-shot examplesを追加
+  - 評価モジュールテスト: `tests/test_evaluation/`を新規作成
+- 2025-12-11: MMLU評価をlm-eval-harness準拠のログ確率方式に変更
+  - `output_type: multiple_choice`（選択肢のログ確率比較）を実装
+  - `compute_choice_logprobs()`をLocalModel・VLLMModelに追加
+  - `MMLUInferenceResult`データクラスを追加（ログ確率情報を保持）
+  - `run_inference_mmlu()`, `run_inference_mmlu_perturbed()`関数を追加
+  - `evaluate_mmlu_logprobs()`関数を追加
+- 2025-12-11: PTモデル・ITモデル両対応を実装
+  - PTモデル（pretrained/base）: few-shot推論対応
+    - GSM8K: 8-shot Chain-of-Thought (Wei et al., 2022)
+    - BBH: 3-shot、MMLU: 5-shot
+  - ITモデル（instruction-tuned）: 0-shot推論（チャットテンプレート適用）
+  - モデルリスト更新（PT: 4モデル、IT: 4モデル）
+  - `--save-inference-results`オプション追加（エラー分析用）
+  - モデル自動判定（is_instruct属性）
+- 2025-12-10: 実装.2 推論・分析機能を実装
+  - 推論実行モジュール (`src/models/inference.py`)
+  - 評価モジュール (`src/evaluation/evaluator.py`, `analyzer.py`)
+  - ワードクラウド生成 (`src/visualization/wordcloud_generator.py`)
+  - 推論実行スクリプト (`scripts/run_inference.py`)
+  - 正規化影響度による単語ランキング機能
 - 2025-12-10: 実装.2進行中 - ベンチマークローダー・摂動生成機能を実装
   - 日本語タスク別ローダー (Jamp, JNLI, NIILC, JSQuAD, JCommonsenseQA)
   - 文字種保持の摂動機能 (ひらがな→ひらがな等)

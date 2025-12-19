@@ -4,58 +4,108 @@ HuggingFaceモデルおよびOpenAI APIモデルの統一的なインターフ�
 """
 
 import os
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+import transformers
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
 from src.utils.logger import logger
 
+# transformersの警告レベルを設定（generation flags警告を抑制）
+transformers.logging.set_verbosity_error()
+# UserWarningも抑制
+warnings.filterwarnings("ignore", message=".*generation flags.*")
+
 # サポートするモデルの定義
 SUPPORTED_MODELS: dict[str, dict[str, Any]] = {
-    # 英語モデル
+    # ============================================================
+    # 英語モデル (pretrained/base) - few-shot推論用
+    # ============================================================
+    "gemma-3-1b-pt": {
+        "hf_name": "google/gemma-3-1b-pt",
+        "language": "english",
+        "type": "local",
+        "is_instruct": False,
+    },
+    "gemma-3-4b-pt": {
+        "hf_name": "google/gemma-3-4b-pt",
+        "language": "english",
+        "type": "local",
+        "is_instruct": False,
+    },
+    "Mistral-7B-v0.3": {
+        "hf_name": "mistralai/Mistral-7B-v0.3",
+        "language": "english",
+        "type": "local",
+        "is_instruct": False,
+    },
+    "Meta-Llama-3.2-3B": {
+        "hf_name": "meta-llama/Llama-3.2-3B",
+        "language": "english",
+        "type": "local",
+        "is_instruct": False,
+    },
+    # ============================================================
+    # 英語モデル (instruction-tuned) - 0-shot推論用
+    # ============================================================
     "gemma-3-1b-it": {
         "hf_name": "google/gemma-3-1b-it",
         "language": "english",
         "type": "local",
+        "is_instruct": True,
     },
     "gemma-3-4b-it": {
         "hf_name": "google/gemma-3-4b-it",
         "language": "english",
         "type": "local",
+        "is_instruct": True,
     },
-    "Mistral-3-8B-Instruct-2512": {
-        "hf_name": "mistralai/Mistral-3-8B-Instruct-2512",
+    "Mistral-7B-Instruct-v0.3": {
+        "hf_name": "mistralai/Mistral-7B-Instruct-v0.3",
         "language": "english",
         "type": "local",
+        "is_instruct": True,
     },
-    "Meta-Llama-3-8B-Instruct": {
-        "hf_name": "meta-llama/Meta-Llama-3-8B-Instruct",
+    "Meta-Llama-3.2-3B-Instruct": {
+        "hf_name": "meta-llama/Llama-3.2-3B-Instruct",
         "language": "english",
         "type": "local",
+        "is_instruct": True,
     },
+    # ============================================================
+    # APIモデル
+    # ============================================================
     "gpt-4-0613": {
         "api_name": "gpt-4-0613",
         "language": "english",
         "type": "api",
+        "is_instruct": True,
     },
-    # 日本語モデル
+    # ============================================================
+    # 日本語モデル (instruction-tuned)
+    # ============================================================
     "Llama-3.1-Swallow-8B-Instruct-v0.5": {
         "hf_name": "tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5",
         "language": "japanese",
         "type": "local",
+        "is_instruct": True,
     },
     "llm-jp-3-3.7b-instruct": {
         "hf_name": "llm-jp/llm-jp-3-3.7b-instruct",
         "language": "japanese",
         "type": "local",
+        "is_instruct": True,
     },
     "llm-jp-3-13b-instruct": {
         "hf_name": "llm-jp/llm-jp-3-13b-instruct",
         "language": "japanese",
         "type": "local",
+        "is_instruct": True,
     },
 }
 
@@ -91,6 +141,7 @@ class GenerationConfig:
     max_new_tokens: int = 512
     temperature: float = 0.0
     top_p: float = 1.0
+    top_k: int = 1
     do_sample: bool = False
     num_return_sequences: int = 1
 
@@ -138,19 +189,22 @@ class BaseModel(ABC):
 class LocalModel(BaseModel):
     """HuggingFaceからロードするローカルモデル."""
 
+    # トークナイザーの最大長（モデルに依存しないデフォルト値）
+    DEFAULT_MAX_LENGTH = 4096
+
     def __init__(
         self,
         model_name: str,
         device: torch.device | None = None,
-        torch_dtype: torch.dtype = torch.bfloat16,
-        use_flash_attention: bool = True,
+        dtype: torch.dtype = torch.bfloat16,
+        use_flash_attention: bool = False,
     ) -> None:
         """初期化.
 
         Args:
             model_name: モデル名
             device: 使用するデバイス
-            torch_dtype: モデルのデータ型
+            dtype: モデルのデータ型
             use_flash_attention: Flash Attention 2を使用するか
         """
         super().__init__(model_name)
@@ -159,7 +213,7 @@ class LocalModel(BaseModel):
             raise ValueError(f"モデル {model_name} はローカルモデルではありません")
 
         self.device = device if device is not None else torch.device("cuda")
-        self.torch_dtype = torch_dtype
+        self.dtype = dtype
         self.hf_name = self.model_info["hf_name"]
 
         logger.info(f"モデルをロード中: {self.hf_name}")
@@ -174,13 +228,17 @@ class LocalModel(BaseModel):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        # max_lengthの設定（モデルに設定がない場合はデフォルト値を使用）
+        if self.tokenizer.model_max_length is None or self.tokenizer.model_max_length > 1e9:
+            self.tokenizer.model_max_length = self.DEFAULT_MAX_LENGTH
+
         # モデルをロード
         attn_implementation = "flash_attention_2" if use_flash_attention else "eager"
 
         try:
             self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
                 self.hf_name,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 device_map="auto",
                 trust_remote_code=True,
                 attn_implementation=attn_implementation,
@@ -190,7 +248,7 @@ class LocalModel(BaseModel):
             logger.info("通常のattentionでリトライします")
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.hf_name,
-                torch_dtype=torch_dtype,
+                dtype=dtype,
                 device_map="auto",
                 trust_remote_code=True,
             )
@@ -198,15 +256,64 @@ class LocalModel(BaseModel):
         self.model.eval()
         logger.info(f"モデルロード完了: {self.hf_name}")
 
+    def _apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+    ) -> str:
+        """メッセージリストにチャットテンプレートを適用.
+
+        Args:
+            messages: メッセージリスト [{"role": "...", "content": "..."}]
+
+        Returns:
+            チャットテンプレートが適用されたプロンプト文字列
+        """
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            return self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            # フォールバック: 単純な結合
+            prompt = ""
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt += f"System: {content}\n\n"
+                elif role == "user":
+                    prompt += f"User: {content}\n\n"
+                elif role == "assistant":
+                    prompt += f"Assistant: {content}\n\n"
+            prompt += "Assistant:"
+            return prompt
+
+    def _prepare_prompt(
+        self,
+        prompt: str | list[dict[str, str]],
+    ) -> str:
+        """プロンプトを準備（メッセージリストの場合はチャットテンプレートを適用）.
+
+        Args:
+            prompt: 文字列またはメッセージリスト
+
+        Returns:
+            チャットテンプレートが適用されたプロンプト文字列
+        """
+        if isinstance(prompt, list):
+            return self._apply_chat_template(prompt)
+        return prompt
+
     def generate(
         self,
-        prompts: list[str],
+        prompts: list[str | list[dict[str, str]]],
         config: GenerationConfig | None = None,
     ) -> list[str]:
         """テキストを生成.
 
         Args:
-            prompts: 入力プロンプトのリスト
+            prompts: 入力プロンプトのリスト（文字列またはメッセージリスト）
             config: 生成設定
 
         Returns:
@@ -219,22 +326,29 @@ class LocalModel(BaseModel):
 
         with torch.no_grad():
             for prompt in prompts:
+                # メッセージリストの場合はチャットテンプレートを適用
+                formatted_prompt = self._prepare_prompt(prompt)
+
                 inputs = self.tokenizer(
-                    prompt,
+                    formatted_prompt,
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
                 ).to(self.model.device)
 
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=config.max_new_tokens,
-                    temperature=config.temperature if config.do_sample else None,
-                    top_p=config.top_p if config.do_sample else None,
-                    do_sample=config.do_sample,
-                    num_return_sequences=config.num_return_sequences,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                )
+                # do_sample=Falseの場合、temperature/top_p/top_kは無視される
+                generate_kwargs = {
+                    "max_new_tokens": config.max_new_tokens,
+                    "do_sample": config.do_sample,
+                    "num_return_sequences": config.num_return_sequences,
+                    "pad_token_id": self.tokenizer.pad_token_id,
+                }
+                if config.do_sample:
+                    generate_kwargs["temperature"] = config.temperature
+                    generate_kwargs["top_p"] = config.top_p
+                    generate_kwargs["top_k"] = config.top_k
+
+                outputs = self.model.generate(**inputs, **generate_kwargs)
 
                 # 入力部分を除いた生成テキストを取得
                 generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
@@ -246,16 +360,92 @@ class LocalModel(BaseModel):
 
         return results
 
+    def compute_choice_logprobs(
+        self,
+        prompt: str | list[dict[str, str]],
+        choices: list[str],
+    ) -> list[float]:
+        """各選択肢のログ確率を計算（lm-eval-harness multiple_choice方式）.
+
+        Args:
+            prompt: プロンプト（文字列またはメッセージリスト）
+            choices: 選択肢のリスト（例: ["A", "B", "C", "D"]）
+
+        Returns:
+            各選択肢のログ確率のリスト
+        """
+        # メッセージリストの場合はチャットテンプレートを適用
+        formatted_prompt = self._prepare_prompt(prompt)
+
+        logprobs_list = []
+
+        with torch.no_grad():
+            for choice in choices:
+                # プロンプト + 選択肢を連結
+                full_text = formatted_prompt + choice
+
+                # トークナイズ
+                inputs = self.tokenizer(
+                    full_text,
+                    return_tensors="pt",
+                    truncation=True,
+                ).to(self.model.device)
+
+                # プロンプト部分のトークン数を取得
+                prompt_inputs = self.tokenizer(
+                    formatted_prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                ).to(self.model.device)
+                prompt_length = prompt_inputs["input_ids"].shape[1]
+
+                # モデルの出力を取得
+                outputs = self.model(**inputs)
+                logits = outputs.logits
+
+                # 選択肢部分のログ確率を計算
+                # logits[i]はi+1番目のトークンの予測なので、ずらして計算
+                choice_logprobs = 0.0
+                for i in range(prompt_length - 1, inputs["input_ids"].shape[1] - 1):
+                    # 次のトークンのログ確率を取得
+                    next_token_id = inputs["input_ids"][0, i + 1]
+                    log_probs = torch.log_softmax(logits[0, i], dim=-1)
+                    choice_logprobs += log_probs[next_token_id].item()
+
+                logprobs_list.append(choice_logprobs)
+
+        return logprobs_list
+
+    def compute_choice_logprobs_batch(
+        self,
+        prompts: list[str | list[dict[str, str]]],
+        choices_list: list[list[str]],
+    ) -> list[list[float]]:
+        """バッチでログ確率を計算.
+
+        Args:
+            prompts: プロンプトのリスト
+            choices_list: 各プロンプトに対する選択肢リストのリスト
+
+        Returns:
+            各プロンプトに対する選択肢のログ確率リストのリスト
+        """
+        results = []
+        for prompt, choices in zip(prompts, choices_list, strict=True):
+            logprobs = self.compute_choice_logprobs(prompt, choices)
+            results.append(logprobs)
+        return results
+
     def generate_batch(
         self,
-        prompts: list[str],
+        prompts: list[str | list[dict[str, str]]],
         config: GenerationConfig | None = None,
         batch_size: int = 8,
     ) -> list[str]:
         """バッチ処理でテキストを生成.
 
         Args:
-            prompts: 入力プロンプトのリスト
+            prompts: 入力プロンプトのリスト（文字列またはメッセージリスト）
             config: 生成設定
             batch_size: バッチサイズ
 
@@ -266,27 +456,40 @@ class LocalModel(BaseModel):
             config = GenerationConfig()
 
         results = []
+        total_batches = (len(prompts) + batch_size - 1) // batch_size
 
         with torch.no_grad():
-            for i in range(0, len(prompts), batch_size):
+            for i in tqdm(
+                range(0, len(prompts), batch_size),
+                total=total_batches,
+                desc="推論中",
+                unit="batch",
+            ):
                 batch_prompts = prompts[i : i + batch_size]
 
+                # メッセージリストの場合はチャットテンプレートを適用
+                formatted_prompts = [self._prepare_prompt(p) for p in batch_prompts]
+
                 inputs = self.tokenizer(
-                    batch_prompts,
+                    formatted_prompts,
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
                 ).to(self.model.device)
 
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=config.max_new_tokens,
-                    temperature=config.temperature if config.do_sample else None,
-                    top_p=config.top_p if config.do_sample else None,
-                    do_sample=config.do_sample,
-                    num_return_sequences=config.num_return_sequences,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                )
+                # do_sample=Falseの場合、temperature/top_p/top_kは無視される
+                generate_kwargs = {
+                    "max_new_tokens": config.max_new_tokens,
+                    "do_sample": config.do_sample,
+                    "num_return_sequences": config.num_return_sequences,
+                    "pad_token_id": self.tokenizer.pad_token_id,
+                }
+                if config.do_sample:
+                    generate_kwargs["temperature"] = config.temperature
+                    generate_kwargs["top_p"] = config.top_p
+                    generate_kwargs["top_k"] = config.top_k
+
+                outputs = self.model.generate(**inputs, **generate_kwargs)
 
                 for j, output in enumerate(outputs):
                     input_length = inputs["input_ids"][j].shape[0]
@@ -335,8 +538,8 @@ class APIModel(BaseModel):
             from openai import OpenAI
 
             self.client = OpenAI(api_key=api_key)
-        except ImportError:
-            raise ImportError("openaiパッケージがインストールされていません: uv add openai")
+        except ImportError as e:
+            raise ImportError("openaiパッケージがインストールされていません: uv add openai") from e
 
         logger.info(f"APIモデル初期化完了: {self.api_name}")
 
@@ -375,18 +578,287 @@ class APIModel(BaseModel):
         return results
 
 
+class VLLMModel(BaseModel):
+    """vLLMを使用した高速推論モデル.
+
+    Flash Attention 2を自動的に使用し、高速なバッチ推論を実現する.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        gpu_ids: str = "0",
+        dtype: str = "bfloat16",
+        gpu_memory_utilization: float = 0.9,
+        max_model_len: int | None = None,
+    ) -> None:
+        """初期化.
+
+        Args:
+            model_name: モデル名
+            gpu_ids: 使用するGPU ID（カンマ区切り）
+            dtype: データ型 ("bfloat16", "float16", "auto")
+            gpu_memory_utilization: GPUメモリ使用率 (0.0-1.0)
+            max_model_len: 最大シーケンス長（Noneの場合はモデルのデフォルト）
+        """
+        super().__init__(model_name)
+
+        if self.model_info["type"] != "local":
+            raise ValueError(f"モデル {model_name} はローカルモデルではありません")
+
+        self.hf_name = self.model_info["hf_name"]
+
+        # GPU設定
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
+        tensor_parallel_size = len(gpu_ids.split(","))
+
+        logger.info(f"vLLMでモデルをロード中: {self.hf_name}")
+        logger.info(f"  GPU: {gpu_ids} (tensor_parallel_size={tensor_parallel_size})")
+        logger.info(f"  dtype: {dtype}")
+        logger.info(f"  gpu_memory_utilization: {gpu_memory_utilization}")
+
+        # vLLMでサポートが限定的なモデルの警告
+        vllm_limited_models = ["gemma-3-1b-it", "gemma-3-4b-it"]
+        if model_name in vllm_limited_models:
+            logger.warning(
+                f"警告: {model_name} はvLLMでネイティブ実装がないため、"
+                "Transformersフォールバックが使用されます。"
+                "出力品質に問題が生じる可能性があります。"
+                "LocalModelの使用を推奨します（--use-vllmを外してください）。"
+            )
+
+        try:
+            from vllm import LLM
+
+            llm_kwargs = {
+                "model": self.hf_name,
+                "dtype": dtype,
+                "tensor_parallel_size": tensor_parallel_size,
+                "gpu_memory_utilization": gpu_memory_utilization,
+                "trust_remote_code": True,
+            }
+
+            if max_model_len is not None:
+                llm_kwargs["max_model_len"] = max_model_len
+
+            self.llm = LLM(**llm_kwargs)
+
+            # トークナイザーを取得（チャットテンプレート用）
+            self.tokenizer = self.llm.get_tokenizer()
+
+        except ImportError as e:
+            raise ImportError("vllmパッケージがインストールされていません: uv add vllm") from e
+
+        logger.info(f"vLLMモデルロード完了: {self.hf_name}")
+
+    def _apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+    ) -> str:
+        """メッセージリストにチャットテンプレートを適用.
+
+        Args:
+            messages: メッセージリスト [{"role": "...", "content": "..."}]
+
+        Returns:
+            チャットテンプレートが適用されたプロンプト文字列
+        """
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            return self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            # フォールバック: 単純な結合
+            prompt = ""
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt += f"System: {content}\n\n"
+                elif role == "user":
+                    prompt += f"User: {content}\n\n"
+                elif role == "assistant":
+                    prompt += f"Assistant: {content}\n\n"
+            prompt += "Assistant:"
+            return prompt
+
+    def _prepare_prompt(
+        self,
+        prompt: str | list[dict[str, str]],
+    ) -> str:
+        """プロンプトを準備（メッセージリストの場合はチャットテンプレートを適用）.
+
+        Args:
+            prompt: 文字列またはメッセージリスト
+
+        Returns:
+            チャットテンプレートが適用されたプロンプト文字列
+        """
+        if isinstance(prompt, list):
+            return self._apply_chat_template(prompt)
+        return prompt
+
+    def generate(
+        self,
+        prompts: list[str | list[dict[str, str]]],
+        config: GenerationConfig | None = None,
+    ) -> list[str]:
+        """テキストを生成.
+
+        vLLMは自動的にバッチ処理を最適化するため、
+        すべてのプロンプトを一度に処理する.
+
+        Args:
+            prompts: 入力プロンプトのリスト（文字列またはメッセージリスト）
+            config: 生成設定
+
+        Returns:
+            生成されたテキストのリスト
+        """
+        if config is None:
+            config = GenerationConfig()
+
+        from vllm import SamplingParams
+
+        # メッセージリストの場合はチャットテンプレートを適用
+        formatted_prompts = [self._prepare_prompt(p) for p in prompts]
+
+        # SamplingParams設定
+        sampling_params = SamplingParams(
+            max_tokens=config.max_new_tokens,
+            temperature=config.temperature if config.do_sample else 0.0,
+            top_p=config.top_p if config.do_sample else 1.0,
+            top_k=config.top_k if config.do_sample else -1,
+            n=config.num_return_sequences,
+        )
+
+        # vLLMで一括生成
+        outputs = self.llm.generate(formatted_prompts, sampling_params)
+
+        # 結果を抽出
+        results = []
+        for output in outputs:
+            generated_text = output.outputs[0].text
+            results.append(generated_text)
+
+        return results
+
+    def generate_batch(
+        self,
+        prompts: list[str | list[dict[str, str]]],
+        config: GenerationConfig | None = None,
+        batch_size: int = 8,
+    ) -> list[str]:
+        """バッチ処理でテキストを生成.
+
+        vLLMは内部で最適なバッチ処理を行うため、
+        generate()と同じ処理を行う.
+
+        Args:
+            prompts: 入力プロンプトのリスト（文字列またはメッセージリスト）
+            config: 生成設定
+            batch_size: バッチサイズ（vLLMでは無視される）
+
+        Returns:
+            生成されたテキストのリスト
+        """
+        # vLLMは自動的に最適なバッチ処理を行うため、generate()を使用
+        return self.generate(prompts, config)
+
+    def compute_choice_logprobs(
+        self,
+        prompt: str | list[dict[str, str]],
+        choices: list[str],
+    ) -> list[float]:
+        """各選択肢のログ確率を計算（lm-eval-harness multiple_choice方式）.
+
+        vLLMを使用してログ確率を計算する.
+
+        Args:
+            prompt: プロンプト（文字列またはメッセージリスト）
+            choices: 選択肢のリスト（例: ["A", "B", "C", "D"]）
+
+        Returns:
+            各選択肢のログ確率のリスト
+        """
+        from vllm import SamplingParams
+
+        # メッセージリストの場合はチャットテンプレートを適用
+        formatted_prompt = self._prepare_prompt(prompt)
+
+        # prompt_logprobs=1で最初のトークンのログ確率を取得
+        sampling_params = SamplingParams(
+            max_tokens=1,
+            temperature=0.0,
+            prompt_logprobs=1,
+        )
+
+        logprobs_list = []
+        for choice in choices:
+            # プロンプト + 選択肢を連結
+            full_text = formatted_prompt + choice
+
+            # vLLMで推論（ログ確率取得）
+            outputs = self.llm.generate([full_text], sampling_params)
+            output = outputs[0]
+
+            # 選択肢トークンのログ確率を取得
+            # prompt_logprobsから選択肢部分のログ確率を抽出
+            if output.prompt_logprobs:
+                # 最後のトークン（選択肢）のログ確率
+                choice_logprob = 0.0
+                prompt_len = len(self.tokenizer.encode(formatted_prompt))
+                for i, logprob_dict in enumerate(output.prompt_logprobs):
+                    if i >= prompt_len and logprob_dict:
+                        # トークンIDに対応するログ確率を取得
+                        for _token_id, logprob_info in logprob_dict.items():
+                            choice_logprob += logprob_info.logprob
+                logprobs_list.append(choice_logprob)
+            else:
+                # フォールバック：0を返す
+                logprobs_list.append(0.0)
+
+        return logprobs_list
+
+    def compute_choice_logprobs_batch(
+        self,
+        prompts: list[str | list[dict[str, str]]],
+        choices_list: list[list[str]],
+    ) -> list[list[float]]:
+        """バッチでログ確率を計算.
+
+        Args:
+            prompts: プロンプトのリスト
+            choices_list: 各プロンプトに対する選択肢リストのリスト
+
+        Returns:
+            各プロンプトに対する選択肢のログ確率リストのリスト
+        """
+        results = []
+        for prompt, choices in zip(prompts, choices_list, strict=True):
+            logprobs = self.compute_choice_logprobs(prompt, choices)
+            results.append(logprobs)
+        return results
+
+
 def load_model(
     model_name: str,
     device: torch.device | None = None,
     api_key: str | None = None,
+    use_vllm: bool = False,
+    gpu_ids: str = "0",
     **kwargs: Any,
 ) -> BaseModel:
     """モデルをロード.
 
     Args:
         model_name: モデル名
-        device: 使用するデバイス（ローカルモデルの場合）
+        device: 使用するデバイス（ローカルモデルの場合、use_vllm=Falseの時のみ使用）
         api_key: APIキー（APIモデルの場合）
+        use_vllm: vLLMを使用するか（高速推論、Flash Attention 2自動使用）
+        gpu_ids: 使用するGPU ID（カンマ区切り、vLLM使用時のみ）
         **kwargs: その他のオプション
 
     Returns:
@@ -401,7 +873,10 @@ def load_model(
     model_info = SUPPORTED_MODELS[model_name]
 
     if model_info["type"] == "local":
-        return LocalModel(model_name, device=device, **kwargs)
+        if use_vllm:
+            return VLLMModel(model_name, gpu_ids=gpu_ids, **kwargs)
+        else:
+            return LocalModel(model_name, device=device, **kwargs)
     elif model_info["type"] == "api":
         return APIModel(model_name, api_key=api_key)
     else:

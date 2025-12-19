@@ -13,7 +13,8 @@
     PYTHONPATH=. uv run python scripts/run_perturbation.py --language english --benchmarks gsm8k
 
     # サンプルデータでテスト
-    PYTHONPATH=. uv run python scripts/run_perturbation.py --language english --top-n 3 --use-sample-data
+    PYTHONPATH=. uv run python scripts/run_perturbation.py \\
+        --language english --top-n 3 --use-sample-data
 """
 
 import argparse
@@ -60,7 +61,7 @@ def load_frequent_words(language: str, top_n: int) -> tuple[list[str], dict[str,
     Returns:
         (単語リスト, 単語→スコアの辞書)
     """
-    freq_file = Path(f"data/processed/{language}/frequent_words_top500.json")
+    freq_file = Path(f"data/processed/{language}/frequent_words_top2000.json")
 
     if not freq_file.exists():
         raise FileNotFoundError(
@@ -171,8 +172,8 @@ def create_sample_benchmark_data(language: str) -> OriginalBenchmarkData:
             },
             {
                 "id": 2,
-                "question": "太郎さんは本を8冊持っています。花子さんに2冊、次郎さんに3冊あげました。"
-                "太郎さんの本は何冊ですか？",
+                "question": "太郎さんは本を8冊持っています。"
+                "花子さんに2冊、次郎さんに3冊あげました。太郎さんの本は何冊ですか？",
                 "answer": "3",
             },
             {

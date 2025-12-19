@@ -18,6 +18,11 @@ dependencies = [
     "openai>=2.9.0",
     "datasets>=4.4.1",
     "pykakasi>=2.3.0",
+    "protobuf>=6.33.2",
+    "sentencepiece>=0.2.1",
+    "vllm>=0.6.0,<0.8.0",
+    "scipy>=1.16.3",
+    "ipykernel>=7.1.0",
 ]
 
 [project.optional-dependencies]
@@ -37,9 +42,15 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]  # スクリプトではパス設定後にインポートが必要
+"src/models/inference.py" = ["E501"]  # few-shot examplesは公式形式を維持するため行長制限を緩和
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.8",
+]

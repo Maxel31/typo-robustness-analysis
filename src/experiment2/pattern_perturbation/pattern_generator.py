@@ -150,49 +150,60 @@ def generate_pattern_perturbations(
         return result
 
     # 1文字置換の候補を探索
-    candidates = find_perturbation_candidates(token)
-    result.all_candidates = [
-        {
-            "perturbed": c["perturbed"],
-            "pattern": c["pattern"],
-            "edit_pos": c["edit_pos"],
-        }
-        for c in candidates
-    ]
+    candidates_by_pattern = find_perturbation_candidates(token)
 
-    # Pattern 1とPattern 2の候補を分類
-    pattern1_candidates = [c for c in candidates if c["pattern"] == "pattern1"]
-    pattern2_candidates = [c for c in candidates if c["pattern"] == "pattern2"]
+    # 編集位置を特定するヘルパー関数
+    def find_edit_pos(original: str, perturbed: str) -> int:
+        for i, (a, b) in enumerate(zip(original.lower(), perturbed.lower(), strict=False)):
+            if a != b:
+                return i
+        return -1
+
+    # 全候補をフラット化してall_candidatesに格納
+    all_candidates_flat = []
+    for _, candidates in candidates_by_pattern.items():
+        for c in candidates:
+            edit_pos = find_edit_pos(token, c.perturbed)
+            all_candidates_flat.append(
+                {
+                    "perturbed": c.perturbed,
+                    "pattern": c.pattern,
+                    "edit_pos": edit_pos,
+                }
+            )
+    result.all_candidates = all_candidates_flat
 
     # Pattern 1: 同品詞の実在語
+    pattern1_candidates = candidates_by_pattern.get("pattern1", [])
     if pattern1_candidates:
         # 最初の候補を使用（決定論的）
         c = pattern1_candidates[0]
-        perturbed_info = get_word_info(c["perturbed"])
-        pos = c["edit_pos"]
-        edit_op = f"replace '{token[pos]}' with '{c['perturbed'][pos]}' at pos {pos}"
+        perturbed_info = get_word_info(c.perturbed)
+        pos = find_edit_pos(token, c.perturbed)
+        edit_op = f"replace '{token[pos]}' with '{c.perturbed[pos]}' at pos {pos}"
         result.mappings["pattern1"] = PerturbationMapping(
             original=token,
-            perturbed=c["perturbed"],
+            perturbed=c.perturbed,
             pattern="pattern1",
             edit_operation=edit_op,
             original_pos=original_info.pos_set,
-            perturbed_pos=perturbed_info.pos_set,
+            perturbed_pos=perturbed_info.pos_set if perturbed_info else set(),
         )
 
     # Pattern 2: 異品詞の実在語
+    pattern2_candidates = candidates_by_pattern.get("pattern2", [])
     if pattern2_candidates:
         c = pattern2_candidates[0]
-        perturbed_info = get_word_info(c["perturbed"])
-        pos = c["edit_pos"]
-        edit_op = f"replace '{token[pos]}' with '{c['perturbed'][pos]}' at pos {pos}"
+        perturbed_info = get_word_info(c.perturbed)
+        pos = find_edit_pos(token, c.perturbed)
+        edit_op = f"replace '{token[pos]}' with '{c.perturbed[pos]}' at pos {pos}"
         result.mappings["pattern2"] = PerturbationMapping(
             original=token,
-            perturbed=c["perturbed"],
+            perturbed=c.perturbed,
             pattern="pattern2",
             edit_operation=edit_op,
             original_pos=original_info.pos_set,
-            perturbed_pos=perturbed_info.pos_set,
+            perturbed_pos=perturbed_info.pos_set if perturbed_info else set(),
         )
 
     # Pattern 3: 非実在語

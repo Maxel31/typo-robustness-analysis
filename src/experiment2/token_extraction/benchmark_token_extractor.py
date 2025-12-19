@@ -13,11 +13,7 @@ from typing import Literal
 
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
-from src.benchmarks.benchmark_loader import (
-    load_bbh,
-    load_gsm8k,
-    load_mmlu,
-)
+from src.benchmarks.benchmark_loader import load_benchmark
 from src.utils.logger import logger
 
 
@@ -171,18 +167,20 @@ def extract_tokens_from_benchmark(
         トークン頻度のCounter
     """
     # ベンチマークをロード
-    if benchmark_name == "gsm8k":
-        examples = load_gsm8k(split="test")
-    elif benchmark_name == "bbh":
-        if subset is None:
-            raise ValueError("BBHにはsubsetの指定が必要です")
-        examples = load_bbh(subset=subset)
-    elif benchmark_name == "mmlu":
-        if subset is None:
-            raise ValueError("MMLUにはsubsetの指定が必要です")
-        examples = load_mmlu(subset=subset, split="test")
-    else:
-        raise ValueError(f"未対応のベンチマーク: {benchmark_name}")
+    if benchmark_name == "bbh" and subset is None:
+        raise ValueError("BBHにはsubsetの指定が必要です")
+    if benchmark_name == "mmlu" and subset is None:
+        raise ValueError("MMLUにはsubsetの指定が必要です")
+
+    benchmark_data = load_benchmark(name=benchmark_name, max_samples=None)
+    examples = benchmark_data.examples
+
+    # サブセット/科目でフィルタリング
+    if subset is not None:
+        if benchmark_name == "bbh":
+            examples = [e for e in examples if e.get("subtask") == subset]
+        elif benchmark_name == "mmlu":
+            examples = [e for e in examples if e.get("subject") == subset]
 
     logger.info(f"ベンチマーク '{benchmark_name}' から {len(examples)} 件をロード")
 

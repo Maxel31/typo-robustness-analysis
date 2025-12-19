@@ -13,7 +13,7 @@ from typing import Literal
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.benchmarks.benchmark_loader import load_bbh, load_gsm8k, load_mmlu
+from src.benchmarks.benchmark_loader import load_benchmark
 from src.experiment2.entropy_analysis.entropy_calculator import (
     GenerationEntropyResult,
     compare_entropy_trajectories,
@@ -145,32 +145,31 @@ def load_benchmark_samples(
     benchmark_name: BenchmarkName,
     num_samples: int = 10,
     subset: str | None = None,
+    seed: int = 42,
 ) -> list[dict]:
-    """ベンチマークからサンプルをロード.
+    """ベンチマークからサンプルをランダムにロード.
 
     Args:
         benchmark_name: ベンチマーク名
         num_samples: サンプル数
-        subset: サブセット名（BBH/MMLUの場合）
+        subset: サブセット名（BBH/MMLUの場合、現在は未使用）
+        seed: 乱数シード（再現性のため）
 
     Returns:
-        サンプルのリスト
+        ランダムに選択されたサンプルのリスト
     """
-    if benchmark_name == "gsm8k":
-        examples = load_gsm8k(split="test")
-    elif benchmark_name == "bbh":
-        if subset is None:
-            subset = "boolean_expressions"  # デフォルトサブセット
-        examples = load_bbh(subset=subset)
-    elif benchmark_name == "mmlu":
-        if subset is None:
-            subset = "abstract_algebra"  # デフォルトサブセット
-        examples = load_mmlu(subset=subset, split="test")
-    else:
-        raise ValueError(f"未対応のベンチマーク: {benchmark_name}")
+    import random
 
-    # サンプル数を制限
-    return examples[:num_samples]
+    # load_benchmark関数を使用してロード
+    # 注: 現在のload_benchmarkは全サブセットをロードする
+    benchmark_data = load_benchmark(name=benchmark_name, max_samples=None)
+    examples = benchmark_data.examples
+
+    # ランダムにサンプルを選択（再現性のためシードを設定）
+    random.seed(seed)
+    if len(examples) <= num_samples:
+        return examples
+    return random.sample(examples, num_samples)
 
 
 def run_case_study(
@@ -182,6 +181,7 @@ def run_case_study(
     max_new_tokens: int = 50,
     output_path: Path | None = None,
     gpu_id: str = "0",
+    seed: int = 42,
 ) -> CaseStudyResult:
     """ケーススタディを実行.
 
@@ -194,6 +194,7 @@ def run_case_study(
         max_new_tokens: 生成する最大トークン数
         output_path: 出力パス
         gpu_id: 使用するGPU ID
+        seed: 乱数シード（サンプル選択の再現性のため）
 
     Returns:
         ケーススタディ結果
@@ -225,7 +226,7 @@ def run_case_study(
     )
 
     # サンプルをロード
-    samples = load_benchmark_samples(benchmark_name, num_samples, subset)
+    samples = load_benchmark_samples(benchmark_name, num_samples, subset, seed=seed)
     logger.info(f"{len(samples)} サンプルをロード")
 
     # ターゲットトークンが指定されていない場合、サンプルから抽出

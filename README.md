@@ -471,8 +471,42 @@ H_t = -Σ p_i log(p_i)
 
 少数のサンプルを使用して、摂動パターンによるエントロピー変化を詳細に分析します。手法の検証や初期分析に使用します。
 
+**コマンドライン実行**:
+```bash
+# GSM8Kで10サンプルのケーススタディを実行
+PYTHONPATH=. uv run python scripts/run_case_study.py \
+    --benchmark gsm8k --model gemma-3-1b-it --num-samples 10
+
+# クイック分析（5サンプル、30トークン、デバッグ用）
+PYTHONPATH=. uv run python scripts/run_case_study.py \
+    --benchmark gsm8k --model gemma-3-1b-it --quick
+
+# BBHの特定サブセットで分析
+PYTHONPATH=. uv run python scripts/run_case_study.py \
+    --benchmark bbh --subset boolean_expressions --model gemma-3-1b-it
+
+# 出力先を指定
+PYTHONPATH=. uv run python scripts/run_case_study.py \
+    --benchmark gsm8k --model gemma-3-1b-it \
+    --output results/experiment2/case_study/my_analysis.json
+
+# GPU指定
+PYTHONPATH=. uv run python scripts/run_case_study.py \
+    --benchmark mmlu --model Mistral-7B-Instruct-v0.3 --gpu-id 1
+```
+
+**オプション**:
+- `--benchmark`: ベンチマーク名（`gsm8k`, `bbh`, `mmlu`）（必須）
+- `--model`: モデル名（必須）
+- `--num-samples`: 分析するサンプル数（デフォルト: 10）
+- `--subset`: サブセット名（BBH/MMLUの場合）
+- `--max-new-tokens`: 生成する最大トークン数（デフォルト: 50）
+- `--gpu-id`: 使用するGPU ID（デフォルト: 0）
+- `--output`: 出力ファイルパス（省略時は自動生成）
+- `--quick`: クイック分析モード（5サンプル、30トークン）
+
+**Pythonから直接実行**:
 ```python
-# Pythonスクリプトから実行（GPU必要）
 from pathlib import Path
 from src.experiment2.entropy_analysis.case_study_analyzer import run_case_study
 
@@ -505,7 +539,7 @@ result = quick_analysis(
 )
 ```
 
-**パラメータ**:
+**関数パラメータ**:
 - `benchmark_name`: ベンチマーク名（`gsm8k`, `bbh`, `mmlu`）
 - `model_name`: モデル名（サポートモデル一覧は上記参照）
 - `num_samples`: 分析するサンプル数（デフォルト: 10）

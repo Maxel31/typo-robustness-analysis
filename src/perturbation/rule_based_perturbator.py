@@ -188,9 +188,7 @@ def process_frequent_words(
 
     # 統計情報を表示
     words_with_perturbations = sum(1 for r in results if r.perturbed_words)
-    total_perturbations = sum(
-        len(r.perturbed_words) for r in results if r.perturbed_words
-    )
+    total_perturbations = sum(len(r.perturbed_words) for r in results if r.perturbed_words)
     logger.info(f"パターン.1該当単語数: {words_with_perturbations}/{len(results)}")
     logger.info(f"パターン.1摂動候補総数: {total_perturbations}")
 
@@ -223,9 +221,7 @@ if __name__ == "__main__":
     # テスト実行
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="規則ベースの摂動生成（パターン.1: 品詞一致）"
-    )
+    parser = argparse.ArgumentParser(description="規則ベースの摂動生成（パターン.1: 品詞一致）")
     parser.add_argument(
         "--input",
         type=Path,

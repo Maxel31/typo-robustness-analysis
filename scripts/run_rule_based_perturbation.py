@@ -123,7 +123,9 @@ def main() -> None:
         if result.perturbed_words:
             words_preview = result.perturbed_words[:5]
             if len(result.perturbed_words) > 5:
-                words_preview_str = ", ".join(words_preview) + f", ... (計{len(result.perturbed_words)}件)"
+                words_preview_str = (
+                    ", ".join(words_preview) + f", ... (計{len(result.perturbed_words)}件)"
+                )
             else:
                 words_preview_str = ", ".join(words_preview)
             logger.info(f"  {result.original_word} -> [{words_preview_str}]")

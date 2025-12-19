@@ -456,31 +456,230 @@ result.jsonの形式:
 摂動パターンがLLMの生成時確信度（エントロピー）に与える影響を分析します。
 
 **摂動パターン**:
-- Pattern 1: 摂動後のトークンが実在 + 同品詞
-- Pattern 2: 摂動後のトークンが実在 + 異品詞
-- Pattern 3: 摂動後のトークンが非実在（UNK）
+- Pattern 1: 摂動後のトークンが実在 + 同品詞（例: cat → bat）
+- Pattern 2: 摂動後のトークンが実在 + 異品詞（例: run → bun）
+- Pattern 3: 摂動後のトークンが非実在（UNK）（例: cat → czt）
+
+**エントロピーとは**:
+```
+H_t = -Σ p_i log(p_i)
+```
+- 低エントロピー（0に近い）: モデルが高確信度で予測（特定のトークンに確率が集中）
+- 高エントロピー（大きい値）: モデルが低確信度で予測（確率が分散）
+
+#### ケーススタディ分析の実行（初期分析）
+
+少数のサンプルを使用して、摂動パターンによるエントロピー変化を詳細に分析します。手法の検証や初期分析に使用します。
 
 ```python
-# トークン抽出の例
+# Pythonスクリプトから実行（GPU必要）
+from pathlib import Path
+from src.experiment2.entropy_analysis.case_study_analyzer import run_case_study
+
+# GSM8Kでケーススタディを実行
+result = run_case_study(
+    benchmark_name="gsm8k",         # ベンチマーク名
+    model_name="gemma-3-1b-it",     # モデル名
+    num_samples=10,                 # 分析するサンプル数
+    max_new_tokens=30,              # 生成する最大トークン数
+    gpu_id="0",                     # 使用するGPU ID
+    output_path=Path("results/experiment2/case_study/gsm8k_gemma3_1b_analysis.json"),
+)
+
+# 結果サマリーを確認
+print(f"分析サンプル数: {result.num_samples}")
+for pattern, stats in result.aggregate_statistics.items():
+    if pattern != "differences":
+        print(f"  {pattern}: 平均エントロピー={stats['avg_mean_entropy']:.4f}")
+```
+
+**クイック分析（デバッグ・検証用）**:
+```python
+from src.experiment2.entropy_analysis.case_study_analyzer import quick_analysis
+
+# 5サンプルで簡易テスト
+result = quick_analysis(
+    model_name="gemma-3-1b-it",
+    num_samples=5,
+    gpu_id="0",
+)
+```
+
+**パラメータ**:
+- `benchmark_name`: ベンチマーク名（`gsm8k`, `bbh`, `mmlu`）
+- `model_name`: モデル名（サポートモデル一覧は上記参照）
+- `num_samples`: 分析するサンプル数（デフォルト: 10）
+- `target_tokens`: 摂動対象トークンリスト（Noneで自動抽出）
+- `subset`: サブセット名（BBH/MMLUの場合）
+- `max_new_tokens`: 生成する最大トークン数（デフォルト: 50）
+- `output_path`: 結果の出力先パス
+- `gpu_id`: 使用するGPU ID
+
+#### 出力形式
+
+**ケーススタディ結果のJSON構造**:
+```json
+{
+  "metadata": {
+    "benchmark_name": "gsm8k",
+    "model_name": "gemma-3-1b-it",
+    "num_samples": 10
+  },
+  "aggregate_statistics": {
+    "original": {
+      "avg_mean_entropy": 2.3456,
+      "avg_max_entropy": 5.1234,
+      "num_samples": 10
+    },
+    "pattern1": {
+      "avg_mean_entropy": 2.5678,
+      "avg_max_entropy": 5.3456,
+      "num_samples": 10
+    },
+    "pattern2": {
+      "avg_mean_entropy": 2.8901,
+      "avg_max_entropy": 5.6789,
+      "num_samples": 10
+    },
+    "pattern3": {
+      "avg_mean_entropy": 3.2345,
+      "avg_max_entropy": 6.1234,
+      "num_samples": 10
+    },
+    "differences": {
+      "pattern1": {
+        "avg_entropy_increase": 0.2222,
+        "avg_entropy_ratio": 1.0947
+      },
+      "pattern2": {
+        "avg_entropy_increase": 0.5445,
+        "avg_entropy_ratio": 1.2321
+      },
+      "pattern3": {
+        "avg_entropy_increase": 0.8889,
+        "avg_entropy_ratio": 1.3789
+      }
+    }
+  },
+  "samples": [
+    {
+      "sample_id": 0,
+      "benchmark_name": "gsm8k",
+      "original_text": "Janet's ducks lay 16 eggs per day...",
+      "perturbed_texts": {
+        "pattern1": "Janet's ducks lay 16 eggs per dey...",
+        "pattern2": "Janet's ducks ley 16 eggs per day...",
+        "pattern3": "Janet's ducks lay 16 egxs per day..."
+      },
+      "entropy_comparison": {
+        "labels": ["original", "pattern1", "pattern2", "pattern3"],
+        "statistics": {
+          "original": {
+            "mean_entropy": 2.1234,
+            "max_entropy": 4.5678,
+            "min_entropy": 0.2345,
+            "num_tokens": 25
+          }
+        },
+        "trajectories": {
+          "original": [2.1, 1.8, 2.3, 1.5, ...],
+          "pattern1": [2.3, 2.0, 2.5, 1.7, ...]
+        },
+        "differences": {
+          "pattern1": {
+            "mean_entropy_diff": 0.1234,
+            "mean_entropy_ratio": 1.0581
+          }
+        }
+      },
+      "perturbation_details": {
+        "pattern1": [
+          {"original": "day", "perturbed": "dey", "pattern": "pattern1", "count": 2}
+        ]
+      }
+    }
+  ]
+}
+```
+
+#### 出力フィールドの解説
+
+**aggregate_statistics（集計統計）**:
+| フィールド | 説明 |
+|-----------|------|
+| `avg_mean_entropy` | 全サンプルの平均エントロピーの平均値 |
+| `avg_max_entropy` | 全サンプルの最大エントロピーの平均値 |
+| `num_samples` | 分析に成功したサンプル数 |
+
+**differences（パターン間差分）**:
+| フィールド | 説明 | 解釈 |
+|-----------|------|------|
+| `avg_entropy_increase` | 元テキスト比でのエントロピー増加量 | 正の値 = 確信度低下 |
+| `avg_entropy_ratio` | 元テキスト比でのエントロピー比率 | 1.0 = 変化なし、>1.0 = 確信度低下 |
+
+**entropy_comparison（各サンプルのエントロピー比較）**:
+| フィールド | 説明 |
+|-----------|------|
+| `mean_entropy` | そのサンプルの平均エントロピー |
+| `max_entropy` | そのサンプルの最大エントロピー（最も不確実な予測位置） |
+| `min_entropy` | そのサンプルの最小エントロピー（最も確信度が高い位置） |
+| `num_tokens` | 生成されたトークン数 |
+| `trajectories` | タイムステップごとのエントロピー値の推移 |
+
+#### 結果の解釈方法
+
+**エントロピー値の目安**:
+- `< 1.0`: 非常に高い確信度（次トークンがほぼ確定）
+- `1.0 - 3.0`: 通常の確信度
+- `3.0 - 5.0`: やや低い確信度
+- `> 5.0`: 低い確信度（複数の候補で迷っている状態）
+
+**パターン間比較の解釈**:
+1. **Pattern 1 vs Original**: 同品詞の実在語への摂動の影響
+   - 差が小さい場合: 文脈から意味を復元できている
+   - 差が大きい場合: 単語の正確性が重要な文脈
+
+2. **Pattern 2 vs Original**: 異品詞の実在語への摂動の影響
+   - Pattern 1より大きな影響が予想される
+   - 品詞情報がモデルの予測に重要であることを示唆
+
+3. **Pattern 3 vs Original**: 非実在語（UNK）への摂動の影響
+   - 最も大きな影響が予想される
+   - モデルの未知語処理能力を反映
+
+**期待される傾向**:
+```
+original < pattern1 < pattern2 < pattern3
+（エントロピー増加順）
+```
+
+この傾向が見られる場合、モデルは単語の「実在性」と「品詞一致」の両方を文脈理解に活用していると解釈できます。
+
+#### その他のモジュール
+
+**トークン抽出**:
+```python
 from src.experiment2.token_extraction.benchmark_token_extractor import (
     extract_frequent_tokens,
 )
 
-# GSM8Kからサブワード単位で頻出トークンを抽出
+# ベンチマークからサブワード単位で頻出トークンを抽出
 result = extract_frequent_tokens(
     benchmark_name="gsm8k",
     model_name="gemma-3-1b-it",
     top_n=300,
-    unit="subword",
+    unit="subword",  # "subword" または "word"
 )
 print(f"ユニークトークン数: {result.unique_tokens}")
+```
 
-# パターン摂動マッピングの生成
+**パターン摂動マッピング生成**:
+```python
 from src.experiment2.pattern_perturbation.pattern_generator import (
     generate_perturbation_mapping_table,
 )
 
-tokens = [t.token for t in result.tokens[:50]]
+tokens = ["day", "cat", "run", "have"]
 mapping = generate_perturbation_mapping_table(
     tokens,
     require_all_patterns=True,  # 全パターンが必要
@@ -488,22 +687,13 @@ mapping = generate_perturbation_mapping_table(
 )
 print(f"全パターン成功: {len(mapping)} tokens")
 
-# ケーススタディ分析（GPU必要）
-from src.experiment2.entropy_analysis.case_study_analyzer import run_case_study
-
-result = run_case_study(
-    benchmark_name="gsm8k",
-    model_name="gemma-3-1b-it",
-    num_samples=10,
-    max_new_tokens=30,
-    gpu_id="0",
-)
+# マッピング内容を確認
+for token, result in mapping.items():
+    print(f"\n{token}:")
+    for pattern, m in result.mappings.items():
+        if m:
+            print(f"  {pattern}: {m.original} -> {m.perturbed}")
 ```
-
-**分析指標**:
-- 平均エントロピー: 生成全体の確信度
-- 最大エントロピー: 最も不確実な予測位置
-- エントロピー推移: タイムステップごとの確信度変化
 
 **出力構造**:
 ```

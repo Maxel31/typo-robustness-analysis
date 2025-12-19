@@ -7,13 +7,17 @@ SUBTLEXus/現代日本語コーパスから頻出単語を抽出する.
 from src.preprocessing.english_words import (
     calculate_importance_score,
     extract_english_frequent_words,
-    extract_top_words as extract_english_top_words,
     load_subtlexus,
+)
+from src.preprocessing.english_words import (
+    extract_top_words as extract_english_top_words,
 )
 from src.preprocessing.japanese_words import (
     extract_japanese_frequent_words,
-    extract_top_words as extract_japanese_top_words,
     load_bccwj,
+)
+from src.preprocessing.japanese_words import (
+    extract_top_words as extract_japanese_top_words,
 )
 
 __all__ = [

@@ -570,6 +570,7 @@ class MMLUInferenceResult:
     is_perturbed: bool = False
     perturbed_text: str | None = None
     prompt: str | None = None
+    generated_text: str | None = None  # 分析用の追加テキスト生成結果
 
 
 def run_inference_mmlu(
@@ -578,6 +579,8 @@ def run_inference_mmlu(
     text_field: str = "question",
     use_chat_format: bool = True,
     save_prompts: bool = False,
+    generate_text: bool = False,
+    generation_config: GenerationConfig | None = None,
 ) -> list[MMLUInferenceResult]:
     """MMLUベンチマークに対してログ確率ベースで推論を実行.
 
@@ -589,6 +592,8 @@ def run_inference_mmlu(
         text_field: テキストフィールド名
         use_chat_format: チャット形式を使用するか（False=ptモデル用）
         save_prompts: プロンプトを結果に保存するか
+        generate_text: 分析用にテキスト生成も行うか（評価には使用しない）
+        generation_config: テキスト生成設定（generate_text=Trueの場合に使用）
 
     Returns:
         推論結果のリスト
@@ -602,6 +607,8 @@ def run_inference_mmlu(
 
     logger.info(f"MMLU推論開始（ログ確率方式）: {len(examples)}件のサンプル")
     logger.info(f"チャット形式: {use_chat_format}")
+    if generate_text:
+        logger.info("分析用テキスト生成: 有効")
 
     # 選択肢リスト
     choices = ["A", "B", "C", "D"]
@@ -627,6 +634,14 @@ def run_inference_mmlu(
             else:
                 prompt_str = prompt
 
+        # 分析用テキスト生成（オプション）
+        generated_text = None
+        if generate_text:
+            config = generation_config or GenerationConfig(max_new_tokens=256)
+            generated_outputs = model.generate([prompt], config)
+            if generated_outputs:
+                generated_text = generated_outputs[0]
+
         result = MMLUInferenceResult(
             example_id=example.get("id", i),
             original_text=question,
@@ -635,6 +650,7 @@ def run_inference_mmlu(
             choice_logprobs=logprobs,
             choices=choices,
             prompt=prompt_str,
+            generated_text=generated_text,
         )
         results.append(result)
 
@@ -647,6 +663,8 @@ def run_inference_mmlu_perturbed(
     perturbed_examples: list[dict[str, Any]],
     use_chat_format: bool = True,
     save_prompts: bool = False,
+    generate_text: bool = False,
+    generation_config: GenerationConfig | None = None,
 ) -> list[MMLUInferenceResult]:
     """摂動済みMMLUデータに対してログ確率ベースで推論を実行.
 
@@ -655,6 +673,8 @@ def run_inference_mmlu_perturbed(
         perturbed_examples: 摂動サンプルデータのリスト
         use_chat_format: チャット形式を使用するか（False=ptモデル用）
         save_prompts: プロンプトを結果に保存するか
+        generate_text: 分析用にテキスト生成も行うか（評価には使用しない）
+        generation_config: テキスト生成設定（generate_text=Trueの場合に使用）
 
     Returns:
         推論結果のリスト
@@ -667,6 +687,8 @@ def run_inference_mmlu_perturbed(
         )
 
     logger.info(f"MMLU摂動データ推論開始（ログ確率方式）: {len(perturbed_examples)}件")
+    if generate_text:
+        logger.info("分析用テキスト生成: 有効")
 
     # 選択肢リスト
     choices = ["A", "B", "C", "D"]
@@ -692,6 +714,14 @@ def run_inference_mmlu_perturbed(
             else:
                 prompt_str = prompt
 
+        # 分析用テキスト生成（オプション）
+        generated_text = None
+        if generate_text:
+            config = generation_config or GenerationConfig(max_new_tokens=256)
+            generated_outputs = model.generate([prompt], config)
+            if generated_outputs:
+                generated_text = generated_outputs[0]
+
         result = MMLUInferenceResult(
             example_id=example.get("id", i),
             original_text=example.get("original_text", ""),
@@ -702,6 +732,7 @@ def run_inference_mmlu_perturbed(
             is_perturbed=True,
             perturbed_text=perturbed_text,
             prompt=prompt_str,
+            generated_text=generated_text,
         )
         results.append(result)
 

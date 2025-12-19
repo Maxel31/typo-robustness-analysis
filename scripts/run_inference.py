@@ -207,6 +207,8 @@ def process_benchmark_mmlu(
     normalization_method: str = "per_perturbation",
     use_chat_format: bool = True,
     save_inference: bool = False,
+    generate_text: bool = False,
+    generation_config: Any = None,
 ) -> AnalysisResult:
     """MMLUベンチマークの推論・評価・分析を実行（ログ確率方式、lm-eval-harness公式準拠）.
 
@@ -223,6 +225,8 @@ def process_benchmark_mmlu(
         normalization_method: 正規化手法
         use_chat_format: チャット形式を使用するか（False=ptモデル用）
         save_inference: 推論結果を保存するか
+        generate_text: 分析用にテキスト生成も行うか（評価には使用しない）
+        generation_config: テキスト生成設定
 
     Returns:
         分析結果
@@ -244,6 +248,8 @@ def process_benchmark_mmlu(
         text_field=text_field,
         use_chat_format=use_chat_format,
         save_prompts=save_inference,
+        generate_text=generate_text,
+        generation_config=generation_config,
     )
 
     # ログ確率方式で評価
@@ -310,6 +316,8 @@ def process_benchmark_mmlu(
                 perturbed_examples=perturbed_examples,
                 use_chat_format=use_chat_format,
                 save_prompts=save_inference,
+                generate_text=generate_text,
+                generation_config=generation_config,
             )
 
             # 摂動推論結果を保存（オプション）
@@ -415,6 +423,7 @@ def process_benchmark(
     normalization_method: str = "per_perturbation",
     use_chat_format: bool = True,
     save_inference: bool = False,
+    generate_mmlu_text: bool = False,
 ) -> AnalysisResult:
     """ベンチマークの推論・評価・分析を実行.
 
@@ -433,6 +442,7 @@ def process_benchmark(
         normalization_method: 正規化手法
         use_chat_format: チャット形式を使用するか（False=ptモデル用）
         save_inference: 推論結果を保存するか
+        generate_mmlu_text: MMLU推論時に追加でテキスト生成も行うか
 
     Returns:
         分析結果
@@ -448,6 +458,8 @@ def process_benchmark(
             normalization_method=normalization_method,
             use_chat_format=use_chat_format,
             save_inference=save_inference,
+            generate_text=generate_mmlu_text,
+            generation_config=generation_config,
         )
 
     evaluator = BenchmarkEvaluator(benchmark_name)
@@ -743,6 +755,14 @@ def main() -> None:
         action="store_true",
         help="推論結果を完全に保存する（エラー分析用）",
     )
+    parser.add_argument(
+        "--generate-mmlu-text",
+        action="store_true",
+        help=(
+            "MMLU推論時に追加でテキスト生成を行う（分析用）。"
+            "評価はログ確率方式のまま、生成テキストをgenerated_textフィールドに記録。"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -829,6 +849,7 @@ def main() -> None:
         normalization_method=args.normalization,
         use_chat_format=use_chat_format,
         save_inference=args.save_inference_results,
+        generate_mmlu_text=args.generate_mmlu_text,
     )
 
     # 結果サマリー

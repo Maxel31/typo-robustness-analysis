@@ -166,6 +166,10 @@ main (本番環境、絶対に直接コミットしない)
   - ランキング生成とJSON出力
 - [x] ワードクラウド可視化 (`src/visualization/wordcloud_generator.py`)
 - [x] 推論実行スクリプト作成 (`scripts/run_inference.py`)
+- [x] ルールベース摂動モジュール実装 (`src/perturbation/rule_based_perturbator.py`)
+  - パターン1: 1文字置換で実在する同品詞の単語になる摂動
+  - WordNetを使用した単語存在確認と品詞判定
+- [x] ルールベース摂動スクリプト作成 (`scripts/run_rule_based_perturbation.py`)
 - [ ] テスト作成と動作確認
 
 **出力構造**:
@@ -275,7 +279,8 @@ NLP2026/
 │   ├── perturbation/  # 摂動処理モジュール
 │   │   ├── __init__.py
 │   │   ├── perturbator.py
-│   │   └── benchmark_perturbator.py
+│   │   ├── benchmark_perturbator.py
+│   │   └── rule_based_perturbator.py  # ルールベース摂動（WordNet使用）
 │   ├── models/        # モデルロード・推論
 │   │   ├── __init__.py
 │   │   ├── model_loader.py
@@ -297,9 +302,10 @@ NLP2026/
 │   ├── test_perturbation/
 │   └── test_models/
 ├── scripts/           # 実行スクリプト
-│   ├── run_preprocessing.py  # 頻出単語抽出
-│   ├── run_perturbation.py   # 摂動データ生成
-│   └── run_inference.py      # 推論実行・影響度分析
+│   ├── run_preprocessing.py        # 頻出単語抽出
+│   ├── run_perturbation.py         # ランダム摂動データ生成
+│   ├── run_rule_based_perturbation.py  # ルールベース摂動生成
+│   └── run_inference.py            # 推論実行・影響度分析
 ├── results/           # 実験結果
 │   └── experiment1/
 │       ├── {model_name}/
@@ -392,6 +398,11 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-16: ルールベース摂動モジュールを実装
+  - `src/perturbation/rule_based_perturbator.py`: WordNetを使用したルールベース摂動
+  - `scripts/run_rule_based_perturbation.py`: CLI実行スクリプト
+  - パターン1: 1文字置換で実在する同品詞の単語になる摂動
+  - NLTKのWordNetを使用して単語存在確認と品詞判定
 - 2025-12-16: lm-eval-harness公式実装に完全準拠
   - GSM8K評価: 数値比較から文字列比較（exact_match）に変更
     - `normalize_gsm8k_answer()`関数追加

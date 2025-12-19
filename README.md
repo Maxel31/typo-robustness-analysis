@@ -212,6 +212,90 @@ data/perturbed/
 - `total_occurrences`: データセット全体での対象単語の出現数
 - `perturbed_occurrences`: 摂動が適用された出現数
 
+### 実装.2: ルールベース摂動生成
+
+ランダム摂動とは別に、言語学的な規則に基づいた摂動を生成します。WordNetを使用して、1文字置換で実在する同品詞の単語になる摂動パターンを列挙します。
+
+```bash
+# 頻出単語上位20件に対してパターン1摂動を生成
+PYTHONPATH=. uv run python scripts/run_rule_based_perturbation.py \
+    --input data/processed/english/frequent_words_top2000.json \
+    --output data/processed/english/pattern1_perturbations.json \
+    --top-n 20
+
+# 全単語を処理（--top-nを省略）
+PYTHONPATH=. uv run python scripts/run_rule_based_perturbation.py \
+    --input data/processed/english/frequent_words_top500.json \
+    --output data/processed/english/pattern1_all.json
+```
+
+**オプション**:
+- `--input`: 入力ファイル（`frequent_words_top{N}.json`形式）（必須）
+- `--output`: 出力ファイルパス（必須）
+- `--top-n`: 処理する単語数の上限（省略時は全単語）
+
+**パターン1の定義**:
+1文字置換（substitution）により、元の単語と同じ品詞を持つ別の実在単語になる摂動。
+- 例: `cat` → `bat`, `cut`, `car` など
+- WordNetを使用して単語の存在と品詞を検証
+- 名詞(n)、動詞(v)、形容詞(a)、副詞(r)に対応
+
+**出力形式**:
+```json
+{
+  "metadata": {
+    "source_file": "data/processed/english/frequent_words_top2000.json",
+    "top_n": 20,
+    "total_words_processed": 20,
+    "words_with_perturbations": 7,
+    "total_perturbations": 153,
+    "pattern_type": "pattern1_same_pos_substitution",
+    "created_at": "2025-12-16T10:30:00+00:00"
+  },
+  "results": [
+    {
+      "original_word": "have",
+      "original_rank": 4,
+      "original_score": 120.5,
+      "pos": ["v"],
+      "perturbations": [
+        {
+          "perturbed_word": "hive",
+          "operation": "substitute",
+          "position": 1,
+          "original_char": "a",
+          "new_char": "i",
+          "shared_pos": ["n", "v"]
+        },
+        {
+          "perturbed_word": "gave",
+          "operation": "substitute",
+          "position": 0,
+          "original_char": "h",
+          "new_char": "g",
+          "shared_pos": ["v"]
+        }
+      ],
+      "perturbation_count": 2
+    }
+  ]
+}
+```
+
+**出力フィールド**:
+- `original_word`: 元の単語
+- `original_rank`: 頻出単語リストにおけるランク
+- `original_score`: 頻出度スコア
+- `pos`: 元の単語の品詞（WordNetで取得）
+- `perturbations`: パターン1に該当する摂動のリスト
+  - `perturbed_word`: 摂動後の単語
+  - `operation`: 操作タイプ（常に`substitute`）
+  - `position`: 置換位置（0-indexed）
+  - `original_char`: 元の文字
+  - `new_char`: 置換後の文字
+  - `shared_pos`: 元の単語と共有する品詞
+- `perturbation_count`: 該当する摂動の総数
+
 ### 実装.2: 推論実行と影響度分析
 
 摂動データに対してLLM推論を実行し、各単語の影響度を分析します。

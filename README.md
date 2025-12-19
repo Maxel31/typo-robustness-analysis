@@ -451,6 +451,71 @@ result.jsonの形式:
 }
 ```
 
+### 実装.3: 摂動パターン vs モデル確信度分析（実験2）
+
+摂動パターンがLLMの生成時確信度（エントロピー）に与える影響を分析します。
+
+**摂動パターン**:
+- Pattern 1: 摂動後のトークンが実在 + 同品詞
+- Pattern 2: 摂動後のトークンが実在 + 異品詞
+- Pattern 3: 摂動後のトークンが非実在（UNK）
+
+```python
+# トークン抽出の例
+from src.experiment2.token_extraction.benchmark_token_extractor import (
+    extract_frequent_tokens,
+)
+
+# GSM8Kからサブワード単位で頻出トークンを抽出
+result = extract_frequent_tokens(
+    benchmark_name="gsm8k",
+    model_name="gemma-3-1b-it",
+    top_n=300,
+    unit="subword",
+)
+print(f"ユニークトークン数: {result.unique_tokens}")
+
+# パターン摂動マッピングの生成
+from src.experiment2.pattern_perturbation.pattern_generator import (
+    generate_perturbation_mapping_table,
+)
+
+tokens = [t.token for t in result.tokens[:50]]
+mapping = generate_perturbation_mapping_table(
+    tokens,
+    require_all_patterns=True,  # 全パターンが必要
+    seed=42,
+)
+print(f"全パターン成功: {len(mapping)} tokens")
+
+# ケーススタディ分析（GPU必要）
+from src.experiment2.entropy_analysis.case_study_analyzer import run_case_study
+
+result = run_case_study(
+    benchmark_name="gsm8k",
+    model_name="gemma-3-1b-it",
+    num_samples=10,
+    max_new_tokens=30,
+    gpu_id="0",
+)
+```
+
+**分析指標**:
+- 平均エントロピー: 生成全体の確信度
+- 最大エントロピー: 最も不確実な予測位置
+- エントロピー推移: タイムステップごとの確信度変化
+
+**出力構造**:
+```
+results/experiment2/
+├── token_extraction/
+│   └── {benchmark_name}_{model_name}_tokens.json
+├── perturbation_mapping/
+│   └── {benchmark_name}_mapping.json
+└── case_study/
+    └── {benchmark_name}_{model_name}_analysis.json
+```
+
 ## 開発
 
 ### コード品質

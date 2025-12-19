@@ -437,9 +437,7 @@ def find_common_tokens(
         token_count.update(tokens)
 
     # 指定数以上のベンチマークに出現するトークンを抽出
-    common_tokens = [
-        token for token, count in token_count.items() if count >= min_benchmarks
-    ]
+    common_tokens = [token for token, count in token_count.items() if count >= min_benchmarks]
 
     # 総頻度順にソート
     token_total_freq: dict[str, int] = {}
@@ -451,8 +449,7 @@ def find_common_tokens(
     common_tokens.sort(key=lambda x: token_total_freq.get(x, 0), reverse=True)
 
     logger.info(
-        f"共通トークン数: {len(common_tokens)} "
-        f"(min_benchmarks={min_benchmarks}/{len(results)})"
+        f"共通トークン数: {len(common_tokens)} (min_benchmarks={min_benchmarks}/{len(results)})"
     )
 
     return common_tokens

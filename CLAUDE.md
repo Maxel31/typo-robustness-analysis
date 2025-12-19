@@ -191,6 +191,46 @@ results/
 │   │       └── perturbations.json  # 摂動詳細
 ```
 
+### 実装.3: (実験.2) 摂動パターンとモデル確信度の関係分析
+
+**目的**: 摂動パターンがLLMの生成時確信度（エントロピー）に与える影響を分析
+
+**摂動パターン**:
+- Pattern 1: 摂動後のトークンが実在 + 同品詞
+- Pattern 2: 摂動後のトークンが実在 + 異品詞
+- Pattern 3: 摂動後のトークンが非実在（UNK）
+
+**処理内容**:
+1. ベンチマーク内の頻出トークンを抽出（サブワード/単語単位）
+2. 各トークンに対して決定論的なパターン摂動を生成
+3. 摂動前後のテキストで生成時エントロピーを計算
+4. パターン間でエントロピー変化を比較
+
+**分析指標**:
+- 平均エントロピー: 生成全体の確信度
+- 最大エントロピー: 最も不確実な予測位置
+- エントロピー推移: タイムステップごとの確信度変化
+
+**進捗状況**:
+- [x] WordNet共通ユーティリティ (`src/perturbation/wordnet_utils.py`)
+- [x] トークン抽出モジュール (`src/experiment2/token_extraction/benchmark_token_extractor.py`)
+- [x] パターン摂動生成モジュール (`src/experiment2/pattern_perturbation/pattern_generator.py`)
+- [x] エントロピー計算モジュール (`src/experiment2/entropy_analysis/entropy_calculator.py`)
+- [x] ケーススタディ分析器 (`src/experiment2/entropy_analysis/case_study_analyzer.py`)
+- [ ] 実行スクリプト作成
+- [ ] テスト作成と動作確認
+
+**出力構造**:
+```
+results/experiment2/
+├── token_extraction/
+│   └── {benchmark_name}_{model_name}_tokens.json  # 頻出トークン
+├── perturbation_mapping/
+│   └── {benchmark_name}_mapping.json  # パターン摂動マッピング
+└── case_study/
+    └── {benchmark_name}_{model_name}_analysis.json  # エントロピー分析結果
+```
+
 ---
 
 ## 使用するモデル・データセット・ベンチマーク
@@ -280,7 +320,8 @@ NLP2026/
 │   │   ├── __init__.py
 │   │   ├── perturbator.py
 │   │   ├── benchmark_perturbator.py
-│   │   └── rule_based_perturbator.py  # ルールベース摂動（WordNet使用）
+│   │   ├── rule_based_perturbator.py  # ルールベース摂動
+│   │   └── wordnet_utils.py           # WordNet共通ユーティリティ
 │   ├── models/        # モデルロード・推論
 │   │   ├── __init__.py
 │   │   ├── model_loader.py
@@ -292,6 +333,20 @@ NLP2026/
 │   ├── visualization/ # 可視化モジュール
 │   │   ├── __init__.py
 │   │   └── wordcloud_generator.py
+│   ├── experiment1/   # 実験1: 単語頻度 vs 正解率分析（名前空間）
+│   │   ├── __init__.py
+│   │   ├── preprocessing/    # 既存モジュールを再エクスポート
+│   │   ├── perturbation/
+│   │   └── evaluation/
+│   ├── experiment2/   # 実験2: 摂動パターン vs モデル確信度分析
+│   │   ├── __init__.py
+│   │   ├── token_extraction/           # ベンチマーク内トークン抽出
+│   │   │   └── benchmark_token_extractor.py
+│   │   ├── pattern_perturbation/       # パターン摂動生成
+│   │   │   └── pattern_generator.py
+│   │   └── entropy_analysis/           # エントロピー分析
+│   │       ├── entropy_calculator.py
+│   │       └── case_study_analyzer.py
 │   └── utils/         # ユーティリティ
 │       ├── __init__.py
 │       ├── config.py
@@ -398,6 +453,12 @@ def setup_device(gpu_id: str = "0") -> torch.device:
 
 ## 更新履歴
 
+- 2025-12-19: 実験2モジュールを実装（摂動パターン vs モデル確信度分析）
+  - `src/perturbation/wordnet_utils.py`: WordNet共通ユーティリティ
+  - `src/experiment2/token_extraction/`: ベンチマーク内トークン抽出
+  - `src/experiment2/pattern_perturbation/`: 決定論的パターン摂動生成
+  - `src/experiment2/entropy_analysis/`: エントロピー計算・ケーススタディ分析
+  - 実験1/実験2のモジュール分離リファクタリング
 - 2025-12-16: ルールベース摂動モジュールを実装
   - `src/perturbation/rule_based_perturbator.py`: WordNetを使用したルールベース摂動
   - `scripts/run_rule_based_perturbation.py`: CLI実行スクリプト

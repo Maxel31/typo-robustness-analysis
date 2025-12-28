@@ -373,6 +373,78 @@ class MMLULoader(BenchmarkLoader):
         )
 
 
+class TruthfulQALoader(BenchmarkLoader):
+    """TruthfulQA用ローダー.
+
+    真実性を測定するQAベンチマーク。
+    オリジナルのGitHubリポジトリからCSVを直接ロードする。
+    https://github.com/sylinrl/TruthfulQA
+    """
+
+    # GitHubリポジトリのCSV URL
+    CSV_URL = "https://raw.githubusercontent.com/sylinrl/TruthfulQA/main/TruthfulQA.csv"
+
+    def load(self, max_samples: int | None = None) -> OriginalBenchmarkData:
+        """TruthfulQAデータをロード.
+
+        Args:
+            max_samples: 最大サンプル数
+
+        Returns:
+            OriginalBenchmarkData
+        """
+        import pandas as pd
+
+        logger.info(f"TruthfulQAをロード ({self.CSV_URL})")
+
+        # GitHubからCSVを直接読み込む
+        df = pd.read_csv(self.CSV_URL)
+
+        # サンプル数を制限
+        if max_samples is not None and max_samples < len(df):
+            df = df.head(max_samples)
+
+        examples = []
+        for idx, row in df.iterrows():
+            # Correct Answers と Incorrect Answers はセミコロン区切りのリスト
+            correct_answers_str = row.get("Correct Answers", "")
+            incorrect_answers_str = row.get("Incorrect Answers", "")
+
+            # セミコロンで分割してリストに変換
+            correct_answers = (
+                [a.strip() for a in str(correct_answers_str).split(";") if a.strip()]
+                if pd.notna(correct_answers_str)
+                else []
+            )
+            incorrect_answers = (
+                [a.strip() for a in str(incorrect_answers_str).split(";") if a.strip()]
+                if pd.notna(incorrect_answers_str)
+                else []
+            )
+
+            example = {
+                "id": idx,
+                "question": row["Question"],
+                "answer": row["Best Answer"],  # 最良の回答を正解として使用
+                "best_incorrect_answer": row.get("Best Incorrect Answer", ""),
+                "correct_answers": correct_answers,
+                "incorrect_answers": incorrect_answers,
+                "category": row["Category"],
+                "type": row["Type"],
+                "source": row.get("Source", ""),
+            }
+            examples.append(example)
+
+        logger.info(f"TruthfulQAロード完了: {len(examples)}件")
+
+        return OriginalBenchmarkData(
+            benchmark_name="truthfulqa",
+            language="english",
+            text_field="question",
+            examples=examples,
+        )
+
+
 class JapaneseTaskLoader(BenchmarkLoader):
     """日本語タスク用ローダー (zenless-lab/llm-jp-eval使用).
 
@@ -450,6 +522,7 @@ BENCHMARK_REGISTRY: dict[str, type[BenchmarkLoader]] = {
     "gsm8k": GSM8KLoader,
     "bbh": BBHLoader,
     "mmlu": MMLULoader,
+    "truthfulqa": TruthfulQALoader,
     # 日本語（5タスク個別登録）
     "jamp": JapaneseTaskLoader,
     "jnli": JapaneseTaskLoader,
@@ -486,6 +559,16 @@ BENCHMARK_CONFIGS: dict[str, BenchmarkConfig] = {
         split="test",
         text_field="question",
         answer_field="answer",
+    ),
+    "truthfulqa": BenchmarkConfig(
+        name="truthfulqa",
+        language="english",
+        dataset_name="truthful_qa",
+        dataset_config="generation",
+        split="validation",  # TruthfulQAはvalidation splitのみ
+        text_field="question",
+        answer_field="answer",
+        extra_fields=["correct_answers", "incorrect_answers", "category", "type"],
     ),
     # 日本語タスク（5タスク個別設定）
     "jamp": BenchmarkConfig(

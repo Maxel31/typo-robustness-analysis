@@ -50,9 +50,10 @@ uv.lock
 htmlcov/
 .pytest_cache/
 
-# Data files (raw data should not be committed)
+# Data files (raw data and output should not be committed)
 data/raw/
 data/processed/
+data/perturbed/
 
 # Results
 results/

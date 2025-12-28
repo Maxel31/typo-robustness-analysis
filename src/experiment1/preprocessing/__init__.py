@@ -1,5 +1,9 @@
-"""前処理モジュール."""
+"""実験1: 前処理モジュール.
 
+SUBTLEXus/現代日本語コーパスから頻出単語を抽出する.
+"""
+
+# 既存のpreprocessingモジュールを再エクスポート
 from src.preprocessing.english_words import (
     calculate_importance_score,
     extract_english_frequent_words,

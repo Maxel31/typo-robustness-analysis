@@ -1,5 +1,9 @@
-"""摂動処理モジュール."""
+"""実験1: 摂動モジュール.
 
+ランダム摂動およびベンチマーク摂動を提供する.
+"""
+
+# 既存のperturbationモジュールを再エクスポート
 from src.perturbation.benchmark_perturbator import (
     BenchmarkPerturbator,
     OccurrencePerturbation,

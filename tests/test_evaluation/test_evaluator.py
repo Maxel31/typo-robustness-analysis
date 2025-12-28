@@ -12,10 +12,15 @@ from src.evaluation.evaluator import (
 class TestExtractAnswerMMLU:
     """MMLU回答抽出のテスト.
 
-    lm-eval-harness公式の三層フォールバック戦略に準拠:
-    1. "The answer is X" パターン
-    2. "Answer: X" パターン
-    3. 選択肢先頭の "X." パターン
+    MMLU-Pro (TIGER-AI-Lab) と openai/simple-evals のベストプラクティスに準拠:
+    1. "answer is X" パターン（MMLU-Pro Stage 1）
+    2. "Answer: X" パターン（MMLU-Pro Stage 2）
+    3. 行頭の "X." パターン（選択肢直接引用）
+    4. 最後の単独選択肢文字（MMLU-Pro Stage 3 フォールバック）
+
+    参考:
+    - https://github.com/TIGER-AI-Lab/MMLU-Pro/blob/main/evaluate_from_local.py
+    - https://github.com/openai/simple-evals/pull/34
     """
 
     def test_the_answer_is_with_period(self) -> None:
@@ -72,9 +77,41 @@ class TestExtractAnswerMMLU:
 
     def test_invalid_response(self) -> None:
         """無効な回答のテスト."""
-        assert extract_answer_mmlu("I don't know the answer.") == "[invalid]"
-        assert extract_answer_mmlu("The lateral pterygoid muscle is important.") == "[invalid]"
+        assert extract_answer_mmlu("I don't know") == "[invalid]"
         assert extract_answer_mmlu("") == "[invalid]"
+
+    def test_extended_choices_a_to_j(self) -> None:
+        """A-J の拡張選択肢のテスト（MMLU-Pro対応）."""
+        assert extract_answer_mmlu("The answer is E") == "E"
+        assert extract_answer_mmlu("The answer is F") == "F"
+        assert extract_answer_mmlu("\nE. I and III\n") == "E"
+        assert extract_answer_mmlu("\nJ. All of the above\n") == "J"
+
+    def test_markdown_removal(self) -> None:
+        """マークダウン記法の除去テスト（openai/simple-evals準拠）."""
+        # **bold** を除去して抽出
+        assert extract_answer_mmlu("The correct answer is **C. I and III only**.") == "C"
+        assert extract_answer_mmlu("The answer is **B**.") == "B"
+        # LaTeX boxed を除去
+        assert extract_answer_mmlu("The answer is $\\boxed{A}$.") == "A"
+
+    def test_multiple_matches_take_last(self) -> None:
+        """複数マッチがある場合、最後のマッチを採用するテスト."""
+        # 途中で考えを変えたケース
+        text = "I think A is correct. No wait, the answer is C."
+        assert extract_answer_mmlu(text) == "C"
+        # 複数の "answer is" パターン
+        text = "Initially the answer is B, but actually the answer is D."
+        assert extract_answer_mmlu(text) == "D"
+
+    def test_real_world_examples(self) -> None:
+        """実際のモデル出力例のテスト."""
+        # ユーザー提供の例
+        text = "\nE. I and III\n\nLet's analyze each statement:..."
+        assert extract_answer_mmlu(text) == "E"
+
+        text = "\nE. All of the above\n\nLet's analyze each statement..."
+        assert extract_answer_mmlu(text) == "E"
 
 
 class TestExtractAnswerBBH:

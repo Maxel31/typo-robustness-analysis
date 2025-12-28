@@ -193,70 +193,72 @@ def extract_answer_bbh(text: str) -> str:
 def extract_answer_mmlu(text: str) -> str:
     """MMLUの回答を抽出（テキスト生成評価用）.
 
-    lm-eval-harnessの公式MMLUはログ確率方式（output_type: multiple_choice）を使用.
-    テキスト生成評価の場合は、三層のフォールバック戦略で回答を抽出:
-    1. "The answer is X" パターン
-    2. "Answer: X" パターン
-    3. 選択肢先頭の "X." パターン（例: "B. is attached to..."）
+    MMLU-Pro (TIGER-AI-Lab) と openai/simple-evals のベストプラクティスに基づく
+    多段階抽出戦略を使用。複数マッチがある場合は最後のマッチを採用。
 
-    参考: https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/filters/extraction.py
+    参考:
+    - https://github.com/TIGER-AI-Lab/MMLU-Pro/blob/main/evaluate_from_local.py
+    - https://github.com/openai/simple-evals/pull/34
+
+    抽出順序:
+    1. "answer is X" パターン（MMLU-Pro Stage 1）
+    2. "Answer: X" パターン（MMLU-Pro Stage 2）
+    3. 行頭の "X." パターン（選択肢直接引用）
+    4. 最後の単独選択肢文字（MMLU-Pro Stage 3 フォールバック）
 
     Args:
         text: 抽出対象のテキスト
 
     Returns:
-        抽出された回答（A, B, C, D、マッチしない場合は"[invalid]"）
+        抽出された回答（A-J、マッチしない場合は"[invalid]"）
     """
+    # 前処理: マークダウン記法を除去（openai/simple-evals準拠）
     text = text.strip()
+    text = re.sub(r"\*\*", "", text)  # **bold** を除去
+    text = re.sub(r"\$\\boxed\{([^}]*)\}\$", r"\1", text)  # $\boxed{X}$ を X に
+    text = re.sub(r"\$([^$]*)\$", r"\1", text)  # $X$ を X に
 
-    # Tier 1: "The answer is X." パターン（ピリオドで終わる形式を期待）
-    answer_match = re.search(
-        r"[Tt]he answer is\s*[:\s]*\(?([A-Da-d])\)?[.\s]*$",
-        text,
-        re.IGNORECASE | re.MULTILINE,
-    )
-    if answer_match:
-        return answer_match.group(1).upper()
-
-    # Tier 1b: "The answer is X" パターン（ピリオドなし、フォールバック）
-    answer_match = re.search(
-        r"[Tt]he answer is\s*[:\s]*\(?([A-Da-d])\)?",
+    # Stage 1: "answer is X" パターン（MMLU-Pro公式）
+    # re.findallで全マッチを取得し、最後のマッチを採用
+    matches = re.findall(
+        r"[Aa]nswer\s+is[:\s]*\(?([A-Ja-j])\)?",
         text,
         re.IGNORECASE,
     )
-    if answer_match:
-        return answer_match.group(1).upper()
+    if matches:
+        return matches[-1].upper()
 
-    # Tier 2: "Answer: X" または ": X" パターン（lm-eval-harness公式のwithout_paren形式）
-    # rf":\s*({without_paren_fallback_regex})" に対応
-    answer_match = re.search(
-        r"(?:answer|答え|回答)[:\s]*\(?([A-Da-d])\)?",
+    # Stage 2: "Answer: X" パターン（MMLU-Pro公式）
+    matches = re.findall(
+        r"[Aa]nswer[:\s]+\(?([A-Ja-j])\)?",
         text,
         re.IGNORECASE,
     )
-    if answer_match:
-        return answer_match.group(1).upper()
+    if matches:
+        return matches[-1].upper()
 
-    # Tier 3: 選択肢先頭の "X." パターン（例: "B. is attached to..."）
-    # モデルが選択肢の内容を直接引用するケースに対応
-    # 行頭または "assistant\n\n" 等の後に来る "X." を抽出
-    answer_match = re.search(
-        r"(?:^|\n)[\s]*([A-Da-d])\.\s",
+    # Stage 3: 行頭の "X." パターン（例: "E. I and III"）
+    # 選択肢を直接引用するモデル出力に対応
+    matches = re.findall(
+        r"(?:^|\n)\s*([A-Ja-j])\.\s",
         text,
         re.MULTILINE,
     )
-    if answer_match:
-        return answer_match.group(1).upper()
+    if matches:
+        return matches[-1].upper()
 
-    # Tier 3b: 単独の選択肢文字（括弧付きまたは単独）
-    # "(A)" または "A" のみの回答
-    answer_match = re.search(
-        r"(?:^|\n)[\s]*\(?([A-Da-d])\)?[\s]*(?:$|\n|\.)",
-        text,
-        re.MULTILINE,
-    )
-    if answer_match:
-        return answer_match.group(1).upper()
+    # Stage 4: 括弧付き選択肢 または 単一文字のみのテキスト（保守的フォールバック）
+    # "I don't know" の "I" を誤抽出しないよう、より厳格な条件を使用
+
+    # 4a: 括弧付きパターン: (A), (B) など
+    matches = re.findall(r"\(([A-Ja-j])\)", text)
+    if matches:
+        return matches[-1].upper()
+
+    # 4b: テキスト全体が単一選択肢文字の場合のみ
+    stripped = text.strip()
+    if len(stripped) == 1 and stripped.upper() in "ABCDEFGHIJ":
+        return stripped.upper()
 
     # マッチしない場合は "[invalid]" を返す
     return "[invalid]"
@@ -279,6 +281,10 @@ def extract_answer_from_text(text: str, benchmark_name: str) -> str:
 
     if benchmark_name == "mmlu":
         return extract_answer_mmlu(text)
+
+    if benchmark_name == "truthfulqa":
+        # TruthfulQAは生成テキストをそのまま正規化して返す
+        return " ".join(text.lower().split())
 
     # 日本語ベンチマーク
     if benchmark_name in ["jamp", "jnli", "niilc", "jsquad", "jcommonsenseqa"]:

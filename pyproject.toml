@@ -23,6 +23,7 @@ dependencies = [
     "vllm>=0.6.0,<0.8.0",
     "scipy>=1.16.3",
     "ipykernel>=7.1.0",
+    "spacy>=3.8.11",
 ]
 
 [project.optional-dependencies]
